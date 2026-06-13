@@ -48,3 +48,9 @@ await Agent.write(deck, "deck.pptx"); // Node only
 
 Coordinates are `0..1` fractions of the slide; text supports inline markdown
 (`**bold**`, `*italic*`, `` `code` ``, `#`/`##`/`###` headings, `[label](url)`).
+
+---
+
+## ⭐ Star Fancy UI
+
+If this package is useful to you, a quick ⭐ on the repo really helps us build a better kit. Thank you!
