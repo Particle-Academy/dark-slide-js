@@ -5,7 +5,8 @@
 Zero-dependency, **isomorphic** (browser + Node) `.pptx` writer + reader for
 agentic deck creation. The Node/TypeScript mirror of the PHP
 [`particle-academy/dark-slide`](https://github.com/Particle-Academy/dark-slide)
-— same deck schema in, same `.pptx` out (feature-parity with PHP 0.5.2).
+— same deck schema in, same `.pptx` out (feature-parity with PHP 0.5.2; the PHP
+package has since shipped 0.6 and 0.7, whose additions are not yet mirrored here).
 
 The deck schema is identical to
 [`@particle-academy/fancy-slides`](https://github.com/Particle-Academy/fancy-slides),
