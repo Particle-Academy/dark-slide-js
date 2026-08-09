@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.6.1 — 2026-08-09
+
+### Fixed
+
+- **The cross-engine parity suites now actually run in CI.** They are the
+  strongest guarantee this pair has — every OOXML part diffed byte-for-byte
+  against the PHP `dark-slide`, plus a reader agreement check — and they had
+  never executed on a runner.
+
+  Two things combined to hide it. `describe.skipIf(!HAS_PHP)` skipped silently,
+  and `ci.yml` installed Node only, so the build went green with **zero
+  cross-engine coverage**. Separately, both PHP helper scripts autoloaded from a
+  hard-coded `../../dark-slide/src`, which only resolves inside the `.agi`
+  envelope — so even with PHP present, another layout found no classes and would
+  have failed looking like a parity break.
+
+  Now: CI installs PHP 8.4 and checks out the PHP repo; the helpers take
+  `DARK_SLIDE_PHP_SRC` (falling back to the sibling path); and a missing PHP
+  **throws in CI** instead of skipping.
+
+  **What you must do:** nothing, unless you run these suites outside the
+  envelope — then set `DARK_SLIDE_PHP_SRC` to the PHP package's `src`.
+
 ## 0.6.0 — 2026-08-07
 
 ### Changed

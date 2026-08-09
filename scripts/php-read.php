@@ -18,7 +18,10 @@ spl_autoload_register(function (string $class): void {
         return;
     }
     $rel = substr($class, strlen($prefix));
-    $file = __DIR__ . '/../../dark-slide/src/' . str_replace('\\', '/', $rel) . '.php';
+    // Outside the .agi envelope the PHP package is not a sibling directory, so CI
+    // (and any other layout) points at it with DARK_SLIDE_PHP_SRC.
+    $root = getenv('DARK_SLIDE_PHP_SRC') ?: __DIR__ . '/../../dark-slide/src';
+    $file = rtrim($root, '/') . '/' . str_replace('\\', '/', $rel) . '.php';
     if (is_file($file)) {
         require $file;
     }

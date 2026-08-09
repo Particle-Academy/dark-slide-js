@@ -234,7 +234,24 @@ describe.skipIf(!HAS_PHP)("cross-engine reader parity (PHP vs TS)", () => {
   }
 });
 
+/**
+ * A missing PHP must never read as a pass.
+ *
+ * This suite is the cross-engine guarantee for the pptx pair — the only thing
+ * asserting that the PHP and TS writers agree byte-for-byte. `skipIf` made a
+ * runner without PHP indistinguishable from a runner where every part matched,
+ * and CI installed Node only, so it had never once executed. Locally a skip is
+ * still the right call; in CI it is a silent hole.
+ */
+if (process.env.CI && !HAS_PHP) {
+  throw new Error(
+    "php is not on PATH. This suite is the cross-engine parity guarantee; " +
+      "skipping it in CI would report success with no coverage. " +
+      "Install PHP 8.2+ and set DARK_SLIDE_PHP_SRC to the PHP package's src/.",
+  );
+}
+
 if (!HAS_PHP) {
   // eslint-disable-next-line no-console
-  console.warn("[reader-parity] php not found on PATH — cross-engine reader parity tests skipped.");
+  console.warn("[reader-parity] php not found on PATH — cross-engine tests skipped (local only; CI throws above).");
 }
