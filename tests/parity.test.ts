@@ -33,6 +33,58 @@ const PNG_1x1 =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQDJ/pLvAAAAAElFTkSuQmCC";
 
 const SCHEMAS: Record<string, unknown> = {
+  /**
+   * Unicode through the markdown tokenizer and the syntax highlighter.
+   *
+   * The polyglot plan's §5 lists these two as a live PHP↔JS divergence — PHP
+   * indexes by BYTE (strlen/substr), the port by UTF-16 code unit. Checked
+   * against both engines, and it is NOT one: output is identical for CJK, emoji
+   * (a surrogate pair on the JS side), combining marks and accented Latin. Both
+   * loops only compare ASCII markers and cut at those positions, and neither a
+   * UTF-8 continuation byte nor a UTF-16 surrogate can collide with ASCII. So
+   * nothing was "fixed" here — working code was left alone.
+   *
+   * The fixture exists because the plan's FORWARD-looking half is right and the
+   * agreement is incidental rather than designed. Rust's `&str` byte-slicing
+   * panics on a non-char boundary, so a third implementation cannot inherit
+   * this for free, and a well-meant tidy to mb_substr / Array.from on either
+   * side would change the output with nothing to catch it. Now something does.
+   */
+  unicodeText: {
+    id: "deck-unicode",
+    title: "Unicode",
+    metadata: META,
+    theme: { name: "default", colors: { accent: "#8B5CF6" } },
+    slides: [
+      {
+        id: "s1",
+        layout: "content",
+        elements: [
+          {
+            id: "e1",
+            type: "text",
+            x: 0.1,
+            y: 0.1,
+            w: 0.8,
+            h: 0.4,
+            content:
+              "# \u65e5\u672c\u8a9e\u306e\u898b\u51fa\u3057\ncaf\u00e9 **bold** and na\u00efve `code`\n- \u592a\u5b57 **\u5f37\u8abf** \u3067\u3059\n- emoji \ud83c\udf89 **bold** end\n- a\u0301 combining mark",
+            format: "markdown",
+          },
+          {
+            id: "e2",
+            type: "code",
+            x: 0.1,
+            y: 0.55,
+            w: 0.8,
+            h: 0.35,
+            language: "php",
+            code: '<?php $x = "caf\u00e9"; // \u65e5\u672c\u8a9e\n$emoji = "\ud83c\udf89";',
+          },
+        ],
+      },
+    ],
+  },
   titleText: {
     id: "deck-title",
     title: "Title Deck",

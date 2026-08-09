@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.6.2 — 2026-08-09
+
+### Added
+
+- **A `unicodeText` cross-engine parity fixture** — CJK, emoji, combining marks
+  and accented Latin through both the markdown tokenizer and the syntax
+  highlighter, diffed byte-for-byte against the PHP `dark-slide`.
+
+  No behaviour changed. The polyglot plan listed PHP's byte indexing
+  (`strlen`/`substr`) against this port's UTF-16 indexing as a live divergence;
+  checked against both engines, it is not one. Both loops only compare ASCII
+  markers and cut at those positions, and neither a UTF-8 continuation byte nor
+  a UTF-16 surrogate can collide with ASCII.
+
+  The fixture is here because that agreement is **incidental rather than
+  designed**: a tidy to `mb_substr` or `Array.from` on either side would change
+  the output, and nothing would have caught it.
+
 ## 0.6.1 — 2026-08-09
 
 ### Fixed
