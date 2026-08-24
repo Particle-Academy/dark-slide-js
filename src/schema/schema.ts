@@ -5,7 +5,15 @@
 export const Schema = {
   VERSION: "0.1.0",
 
-  ELEMENT_TYPES: ["text", "image", "chart", "code", "table", "shape", "embed"] as const,
+  /**
+   * `kpiBand` and `metadataGrid` are COMPOSITES: they expand into a `table`
+   * before the writer serialises anything, so they add no OOXML surface and
+   * read back as the table they became. See table/composites.
+   */
+  ELEMENT_TYPES: ["text", "image", "chart", "code", "table", "shape", "embed", "kpiBand", "metadataGrid"] as const,
+
+  /** The subset of ELEMENT_TYPES that is sugar over a `table`. */
+  COMPOSITE_ELEMENT_TYPES: ["kpiBand", "metadataGrid"] as const,
   SLIDE_LAYOUTS: [
     "blank",
     "title",

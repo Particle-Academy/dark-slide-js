@@ -12,10 +12,19 @@ import { MarkdownInline } from "../helpers/markdown-inline";
 import { SyntaxHighlighter } from "../helpers/syntax-highlighter";
 import { Xml } from "../helpers/xml";
 import { Schema } from "../schema/schema";
+import { Composites } from "../table/composites";
+import { TableResolver, type ResolvedCell } from "../table/table-resolver";
+import { BoxDecoration } from "../text/box-decoration";
 import { isNumeric, isPlainObject } from "../util";
 import { zipSync } from "../zip";
 
 const NS_CHART = "http://schemas.openxmlformats.org/drawingml/2006/chart";
+
+/** `anchor` on `<a:tcPr>` — the vertical anchor of a table cell. */
+const ANCHOR_ATTR: Record<string, string> = { top: "t", middle: "ctr", bottom: "b" };
+
+/** `algn` on `<a:pPr>`. */
+const ALIGN_ATTR: Record<string, string> = { left: "l", center: "ctr", right: "r", justify: "just" };
 
 const LAYOUT_ORDER = [
   "blank",
@@ -94,6 +103,9 @@ export class PptxWriter {
   /** Ordered list of chart part XML queued for the archive. */
   private chartFiles: { path: string; xml: string }[] = [];
   private themeAccent = "8B5CF6";
+
+  /** The deck's theme, kept whole so the table resolver can read its colours. */
+  private deckTheme: Any = {};
   private tnId = 0;
   private pendingSlideRels: Record<number, Rel[]> = {};
 
@@ -113,6 +125,7 @@ export class PptxWriter {
     this.chartFiles = [];
     this.pendingSlideRels = {};
     [this.themeAccent] = Color.parse((deck?.theme?.colors?.accent ?? "#8B5CF6") as string, "8B5CF6");
+    this.deckTheme = isPlainObject(deck?.theme) ? deck.theme : {};
 
     const slides: Any[] = deck?.slides ?? [];
     const slideCount = slides.length;
@@ -1143,6 +1156,13 @@ export class PptxWriter {
 
   private buildElementXml(element: Any, shapeId: number, slideNumber: number): [string, Rel[]] {
     const rels: Rel[] = [];
+
+    // Composites are authoring sugar: they become an ordinary `table` element
+    // here, before anything is serialised. See table/composites.
+    if (Composites.isComposite(element.type)) {
+      element = Composites.expand(element, this.deckTheme);
+    }
+
     let xml: string;
     switch (element.type) {
       case "text":
@@ -1204,12 +1224,12 @@ export class PptxWriter {
 
   private buildTextShape(element: Any, shapeId: number): string {
     const xfrm = this.xfrmFromFractions(element);
-    const body = this.buildTextBody(
-      String(element.content ?? ""),
-      element.style ?? {},
-      String(element.format ?? "plain"),
-    );
+    const style: Any = isPlainObject(element.style) ? element.style : {};
+    const body = this.buildTextBody(String(element.content ?? ""), style, String(element.format ?? "plain"));
     const id = element.id ?? `text-${shapeId}`;
+
+    const widthEmu = Emu.fromFracX(toFloat(element.w ?? 0.8));
+    const heightEmu = Emu.fromFracY(toFloat(element.h ?? 0.2));
 
     return (
       "<p:sp>" +
@@ -1220,8 +1240,7 @@ export class PptxWriter {
       "</p:nvSpPr>" +
       "<p:spPr>" +
       xfrm +
-      '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>' +
-      "<a:noFill/>" +
+      BoxDecoration.spPr(style, widthEmu, heightEmu) +
       "</p:spPr>" +
       body +
       "</p:sp>"
@@ -1380,14 +1399,37 @@ export class PptxWriter {
     }
 
     const [fillHex, fillAlpha] = Color.parse(element.fill ?? "rgba(139,92,246,0.15)", "8B5CF6");
-    const [strokeHex] = Color.parse(element.stroke ?? "#8B5CF6", "8B5CF6");
-    const strokeWidthEmu = Emu.fromPt(toFloat(element.strokeWidth ?? 2));
+    const [strokeHex, strokeAlpha] = Color.parse(element.stroke ?? "#8B5CF6", "8B5CF6");
+    const strokeWidth = toFloat(element.strokeWidth ?? 2);
+    const strokeWidthEmu = Emu.fromPt(strokeWidth);
     const dashStr = element.dashed ? '<a:prstDash val="dash"/>' : "";
 
     const fillXml =
       fillAlpha === 0
         ? "<a:noFill/>"
         : '<a:solidFill><a:srgbClr val="' + fillHex + '"><a:alpha val="' + fillAlpha + '"/></a:srgbClr></a:solidFill>';
+
+    // "No outline" has to be sayable. `<a:ln w="0">` is a HAIRLINE in every
+    // renderer tested, not an absence, so a zero width or a transparent stroke
+    // has to become an explicit `<a:noFill/>` — otherwise every composed
+    // callout carries a thin border nobody asked for.
+    const lnXml =
+      strokeWidth <= 0 || strokeAlpha === 0
+        ? "<a:ln><a:noFill/></a:ln>"
+        : '<a:ln w="' + strokeWidthEmu + '"><a:solidFill><a:srgbClr val="' + strokeHex + '"/></a:solidFill>' + dashStr + "</a:ln>";
+
+    // A shape carrying `content` gets a real text body. Before this it was
+    // always an empty `<a:endParaRPr/>`, so a labelled shape was two elements
+    // the author had to keep aligned by hand.
+    const content = String(element.content ?? "");
+    const txBody =
+      content === ""
+        ? '<p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:endParaRPr lang="en-US"/></a:p></p:txBody>'
+        : this.buildTextBody(
+            content,
+            { align: "center", verticalAlign: "middle", ...(isPlainObject(element.style) ? element.style : {}) },
+            String(element.format ?? "plain"),
+          );
 
     return (
       "<p:sp>" +
@@ -1400,9 +1442,9 @@ export class PptxWriter {
       xfrm +
       '<a:prstGeom prst="' + prst + '"><a:avLst/></a:prstGeom>' +
       fillXml +
-      '<a:ln w="' + strokeWidthEmu + '"><a:solidFill><a:srgbClr val="' + strokeHex + '"/></a:solidFill>' + dashStr + "</a:ln>" +
+      lnXml +
       "</p:spPr>" +
-      '<p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:endParaRPr lang="en-US"/></a:p></p:txBody>' +
+      txBody +
       "</p:sp>"
     );
   }
@@ -1468,50 +1510,40 @@ export class PptxWriter {
   }
 
   private buildTable(element: Any, shapeId: number): string {
-    const columns: Any[] = Array.isArray(element.columns) ? element.columns : [];
-    const rows: Any[] = Array.isArray(element.rows) ? element.rows : [];
-    if (columns.length === 0) {
+    const columnsRaw: Any[] = Array.isArray(element.columns) ? element.columns : [];
+    if (columnsRaw.length === 0) {
       return this.buildPlaceholder("[table: no columns]", element, shapeId);
     }
 
-    const totalWidthEmu = Emu.fromFracX(toFloat(element.w ?? 0.5));
-    const colCount = columns.length;
-    const colWidthEmu = Math.round(totalWidthEmu / Math.max(1, colCount));
+    const table = TableResolver.resolve(element, this.deckTheme);
 
-    const headerRowH = Emu.fromPt(40);
-    const bodyRowH = Emu.fromPt(30);
+    const totalWidthEmu = Emu.fromFracX(toFloat(element.w ?? 0.5));
+    const widths = TableResolver.columnWidthsEmu(table.columns, totalWidthEmu);
 
     let gridCols = "";
-    for (let i = 0; i < columns.length; i++) {
-      gridCols += '<a:gridCol w="' + colWidthEmu + '"/>';
+    for (const w of widths) {
+      gridCols += '<a:gridCol w="' + w + '"/>';
     }
 
-    let headerCells = "";
-    for (const col of columns) {
-      const label = String(col.label ?? col.key ?? "");
-      headerCells += this.buildTableCell(label, true);
-    }
-    const headerRow = '<a:tr h="' + headerRowH + '">' + headerCells + "</a:tr>";
-
-    let bodyRows = "";
-    let rowIndex = 0;
-    for (const row of rows) {
-      if (!isPlainObject(row)) {
-        continue;
-      }
+    let rowsXml = "";
+    for (const row of table.rows) {
       let cells = "";
-      for (const col of columns) {
-        const key = String(col.key ?? "");
-        const value = row[key] ?? "";
-        const text = isScalar(value) ? scalarToString(value) : JSON.stringify(value);
-        cells += this.buildTableCell(String(text), false, rowIndex % 2 === 1);
+      for (const cell of row.cells) {
+        cells += this.buildTableCell(cell);
       }
-      bodyRows += '<a:tr h="' + bodyRowH + '">' + cells + "</a:tr>";
-      rowIndex++;
+      rowsXml += '<a:tr h="' + Emu.fromPt(row.height) + '">' + cells + "</a:tr>";
     }
 
     const xfrm = this.xfrmFromFractions(element);
     const id = element.id ?? `table-${shapeId}`;
+
+    // "No Style, No Grid". Every fill and every rule is now stated per cell, so
+    // a built-in table style is not a default to fall back on — it is a second
+    // opinion layered on top of ours. The old id was Medium Style 2 Accent 1,
+    // whose banding fought the striping below it.
+    const tblPr =
+      "<a:tblPr" + (table.hasHeader ? ' firstRow="1"' : "") +
+      "><a:tableStyleId>{2D5ABB26-0587-4C30-8999-92F81FD0307C}</a:tableStyleId></a:tblPr>";
 
     return (
       "<p:graphicFrame>" +
@@ -1524,10 +1556,9 @@ export class PptxWriter {
       '<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">' +
       '<a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/table">' +
       "<a:tbl>" +
-      '<a:tblPr firstRow="1" bandRow="1"><a:tableStyleId>{5C22544A-7EE6-4342-B048-85BDC9FD1C3A}</a:tableStyleId></a:tblPr>' +
+      tblPr +
       "<a:tblGrid>" + gridCols + "</a:tblGrid>" +
-      headerRow +
-      bodyRows +
+      rowsXml +
       "</a:tbl>" +
       "</a:graphicData>" +
       "</a:graphic>" +
@@ -1535,30 +1566,89 @@ export class PptxWriter {
     );
   }
 
-  private buildTableCell(text: string, header: boolean, striped = false): string {
-    let fill: string;
-    let textColor: string;
-    let bold: string;
-    if (header) {
-      fill = '<a:solidFill><a:srgbClr val="8B5CF6"/></a:solidFill>';
-      textColor = "FFFFFF";
-      bold = ' b="1"';
-    } else {
-      fill = striped ? '<a:solidFill><a:srgbClr val="F8FAFC"/></a:solidFill>' : "<a:noFill/>";
-      textColor = "0F172A";
-      bold = "";
+  /**
+   * Serialise one resolved cell. Makes no styling decisions — every value here
+   * was decided by the resolver.
+   *
+   * Three things in here are load-bearing and easy to get wrong:
+   *
+   *   - `gridSpan` / `rowSpan` / `hMerge` / `vMerge` are attributes of
+   *     `<a:tc>`, NOT of `<a:tcPr>`. On `tcPr` they parse fine and are silently
+   *     ignored, so the table renders unmerged with no error anywhere.
+   *   - `<a:tcPr>` has a FIXED child order: lnL, lnR, lnT, lnB, then the fill.
+   *     Emitting the fill first produces a file whose fill a reader drops.
+   *   - "No border" is STATED. An absent `<a:lnL>` is an UNSPECIFIED rule, not
+   *     an absent one, and a reader supplies its own.
+   */
+  private buildTableCell(cell: ResolvedCell): string {
+    let attrs = "";
+    if (cell.colSpan > 1) attrs += ' gridSpan="' + cell.colSpan + '"';
+    if (cell.rowSpan > 1) attrs += ' rowSpan="' + cell.rowSpan + '"';
+    if (cell.merged === "horizontal" || cell.merged === "both") attrs += ' hMerge="1"';
+    if (cell.merged === "vertical" || cell.merged === "both") attrs += ' vMerge="1"';
+
+    const pad = cell.padding;
+    const tcPrAttrs =
+      ' marL="' + Emu.fromPt(pad.left) + '"' +
+      ' marR="' + Emu.fromPt(pad.right) + '"' +
+      ' marT="' + Emu.fromPt(pad.top) + '"' +
+      ' marB="' + Emu.fromPt(pad.bottom) + '"' +
+      ' anchor="' + ANCHOR_ATTR[cell.anchor]! + '"';
+
+    let borders = "";
+    for (const [side, suffix] of [["left", "L"], ["right", "R"], ["top", "T"], ["bottom", "B"]] as const) {
+      const spec = cell.borders[side];
+      if (spec === null) {
+        borders += "<a:ln" + suffix + "><a:noFill/></a:ln" + suffix + ">";
+        continue;
+      }
+      borders +=
+        "<a:ln" + suffix + ' w="' + Emu.fromPt(spec.width) + '" cap="flat" cmpd="sng" algn="ctr">' +
+        '<a:solidFill><a:srgbClr val="' + spec.color + '"/></a:solidFill>' +
+        '<a:prstDash val="' + spec.style + '"/>' +
+        "</a:ln" + suffix + ">";
     }
 
+    const fill =
+      cell.fill === null
+        ? "<a:noFill/>"
+        : '<a:solidFill><a:srgbClr val="' + cell.fill + '"/></a:solidFill>';
+
     return (
-      "<a:tc>" +
+      "<a:tc" + attrs + ">" +
       "<a:txBody>" +
-      '<a:bodyPr wrap="square" anchor="ctr" lIns="91440" tIns="45720" rIns="91440" bIns="45720"/>' +
+      "<a:bodyPr/>" +
       "<a:lstStyle/>" +
-      '<a:p><a:pPr algn="l"/><a:r><a:rPr lang="en-US" sz="1400"' + bold + '><a:solidFill><a:srgbClr val="' + textColor + '"/></a:solidFill></a:rPr><a:t>' + Xml.text(text) + "</a:t></a:r></a:p>" +
+      '<a:p><a:pPr algn="' + ALIGN_ATTR[cell.align]! + '"/>' +
+      this.buildCellRun(cell) +
+      "</a:p>" +
       "</a:txBody>" +
-      "<a:tcPr>" + fill + "</a:tcPr>" +
+      "<a:tcPr" + tcPrAttrs + ">" + borders + fill + "</a:tcPr>" +
       "</a:tc>"
     );
+  }
+
+  private buildCellRun(cell: ResolvedCell): string {
+    let rPr = '<a:rPr lang="en-US" sz="' + Emu.hundredthsOfPoint(cell.fontSize) + '"';
+    if (cell.bold) rPr += ' b="1"';
+    if (cell.italic) rPr += ' i="1"';
+    if (cell.underline) rPr += ' u="sng"';
+    if (cell.letterSpacing !== 0) rPr += ' spc="' + Emu.hundredthsOfPoint(cell.letterSpacing) + '"';
+    if (cell.caps !== "none") rPr += ' cap="' + cell.caps + '"';
+    rPr += ">";
+    rPr += '<a:solidFill><a:srgbClr val="' + cell.color + '"/></a:solidFill>';
+    if (cell.fontFamily !== null) {
+      rPr += '<a:latin typeface="' + Xml.attr(cell.fontFamily) + '"/>';
+    }
+    rPr += "</a:rPr>";
+
+    // An empty run is legal but PowerPoint prefers an endParaRPr for a
+    // genuinely empty cell — and a merged continuation cell is always one.
+    if (cell.text === "") {
+      return '<a:endParaRPr lang="en-US" sz="' + Emu.hundredthsOfPoint(cell.fontSize) + '"/>';
+    }
+
+    return "<a:r>" + rPr + "<a:t>" + Xml.text(cell.text) + "</a:t></a:r>";
   }
 
   // ─── Charts ───────────────────────────────────────────────────────────
@@ -1976,6 +2066,9 @@ export class PptxWriter {
     }
 
     const renderRuns = format === "markdown";
+    const spacing = this.paragraphSpacing(style);
+    const bullet = this.bulletMarkup(style.bullet ?? null);
+    const runExtra = this.runExtraAttrs(style);
 
     let paragraphs = "";
     const lines = content.split("\n");
@@ -2012,11 +2105,9 @@ export class PptxWriter {
       }
 
       let pPr = '<a:pPr algn="' + align + '"';
-      if (isBullet) {
-        pPr += ' indent="-228600" marL="228600"><a:buFont typeface="Arial"/><a:buChar char="•"/>';
-      } else {
-        pPr += "><a:buNone/>";
-      }
+      pPr += isBullet ? ' indent="-228600" marL="228600">' : ">";
+      pPr += spacing;
+      pPr += isBullet ? bullet : "<a:buNone/>";
       pPr += "</a:pPr>";
 
       let runs = "";
@@ -2034,10 +2125,11 @@ export class PptxWriter {
             token.b,
             token.i,
             token.code,
+            runExtra,
           );
         }
       } else {
-        runs = this.buildRun(body, paragraphSz, paragraphBold, baseItalic, baseUnderline, colorHex, fontFamily, false, false, false);
+        runs = this.buildRun(body, paragraphSz, paragraphBold, baseItalic, baseUnderline, colorHex, fontFamily, false, false, false, runExtra);
       }
 
       paragraphs += "<a:p>" + pPr + runs + "</a:p>";
@@ -2045,7 +2137,7 @@ export class PptxWriter {
 
     return (
       "<p:txBody>" +
-      '<a:bodyPr wrap="square" anchor="' + anchor.slice(3, -1) + '" rtlCol="0"/>' +
+      '<a:bodyPr wrap="square" anchor="' + anchor.slice(3, -1) + '" rtlCol="0"' + BoxDecoration.bodyInsets(style) + "/>" +
       "<a:lstStyle/>" +
       paragraphs +
       "</p:txBody>"
@@ -2063,6 +2155,7 @@ export class PptxWriter {
     bold: boolean,
     italic: boolean,
     code: boolean,
+    extra = "",
   ): string {
     const b = bold ? ' b="1"' : baseBold;
     const i = (italic ? ' i="1"' : "") || baseItalic;
@@ -2076,9 +2169,69 @@ export class PptxWriter {
     }
 
     const rPr =
-      '<a:rPr lang="en-US" sz="' + sz + '"' + b + i + u + '><a:solidFill><a:srgbClr val="' + color + '"/></a:solidFill>' + family + "</a:rPr>";
+      '<a:rPr lang="en-US" sz="' + sz + '"' + b + i + u + extra + '><a:solidFill><a:srgbClr val="' + color + '"/></a:solidFill>' + family + "</a:rPr>";
 
     return "<a:r>" + rPr + "<a:t>" + Xml.text(text) + "</a:t></a:r>";
+  }
+
+  /**
+   * `<a:lnSpc>` / `<a:spcBef>` / `<a:spcAft>` for a paragraph.
+   *
+   * `lineHeight` is a MULTIPLE (1.4 = 140%), matching CSS and the fancy-slides
+   * editor; `spaceBefore` / `spaceAfter` are points. Empty when the style is
+   * silent, so decks that predate this keep their bytes.
+   */
+  private paragraphSpacing(style: Any): string {
+    let out = "";
+    if (isNumeric(style?.lineHeight)) {
+      out += '<a:lnSpc><a:spcPct val="' + Math.round(toFloat(style.lineHeight) * 100000) + '"/></a:lnSpc>';
+    }
+    if (isNumeric(style?.spaceBefore)) {
+      out += '<a:spcBef><a:spcPts val="' + Emu.hundredthsOfPoint(toFloat(style.spaceBefore)) + '"/></a:spcBef>';
+    }
+    if (isNumeric(style?.spaceAfter)) {
+      out += '<a:spcAft><a:spcPts val="' + Emu.hundredthsOfPoint(toFloat(style.spaceAfter)) + '"/></a:spcAft>';
+    }
+    return out;
+  }
+
+  /**
+   * The bullet markup for a list paragraph.
+   *
+   * `none` suppresses it, `number` makes an auto-numbered list, and anything
+   * else is taken as the literal character — which is all a check-mark list is.
+   * The default stays the round bullet the writer has always emitted.
+   */
+  private bulletMarkup(bullet: Any): string {
+    if (bullet === null || bullet === undefined || bullet === "") {
+      return '<a:buFont typeface="Arial"/><a:buChar char="•"/>';
+    }
+    if (bullet === "none" || bullet === false) {
+      return "<a:buNone/>";
+    }
+    if (bullet === "number") {
+      return '<a:buAutoNum type="arabicPeriod"/>';
+    }
+    return '<a:buFont typeface="Arial"/><a:buChar char="' + Xml.attr(String(bullet)) + '"/>';
+  }
+
+  /**
+   * Run attributes that apply to every run in the body: letter spacing and
+   * capitalisation. Both are `<a:rPr>` attributes, so they have to be built as
+   * a string and appended rather than nested.
+   */
+  private runExtraAttrs(style: Any): string {
+    let out = "";
+    if (isNumeric(style?.letterSpacing)) {
+      out += ' spc="' + Emu.hundredthsOfPoint(toFloat(style.letterSpacing)) + '"';
+    }
+    const caps = style?.caps ?? null;
+    if (caps === "small") {
+      out += ' cap="small"';
+    } else if (caps === "all" || caps === "upper") {
+      out += ' cap="all"';
+    }
+    return out;
   }
 
   private weightToBold(weight: Any): string {

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Agent, unzipSync } from "../src";
@@ -12,6 +12,25 @@ import { Agent, unzipSync } from "../src";
 // compared byte-for-byte. Skips automatically when `php` isn't on PATH.
 
 const PHP_SCRIPT = join(__dirname, "..", "scripts", "php-tobytes.php");
+
+/**
+ * The rich-constructs reference deck, loaded from the PHP repository rather
+ * than transcribed here.
+ *
+ * It is the acceptance artifact for the whole trio — a nine-slide deck built
+ * from the construct classes of a real paginated business document (metadata
+ * grid, KPI band, accent-bar callouts, tables with a highlighted total row,
+ * check-mark lists, a three-column comparison). Copying it into each repo
+ * would give three fixtures that drift; this resolves the same file the PHP
+ * sources are resolved from, so all three engines are compared on identical
+ * input.
+ */
+function referenceDeck(): unknown | null {
+  const srcRoot = process.env.DARK_SLIDE_PHP_SRC ?? join(__dirname, "..", "..", "dark-slide", "src");
+  const file = join(srcRoot, "..", "tests", "fixtures", "reference-deck.json");
+  if (!existsSync(file)) return null;
+  return JSON.parse(readFileSync(file, "utf8")) as unknown;
+}
 
 function php(args: string[], opts: Parameters<typeof execFileSync>[2] = {}): Buffer {
   return execFileSync("php", args, { shell: true, ...opts }) as Buffer;
@@ -354,6 +373,17 @@ describe.skipIf(!HAS_PHP)("cross-engine parity (PHP vs TS)", () => {
   beforeAll(() => {
     dir = mkdtempSync(join(tmpdir(), "dark-slide-parity-"));
   });
+
+  const REFERENCE = referenceDeck();
+  if (REFERENCE !== null) {
+    SCHEMAS.richConstructsReference = REFERENCE;
+  } else if (process.env.CI) {
+    throw new Error(
+      "the rich-constructs reference deck was not found next to the PHP sources. " +
+        "It is the acceptance artifact for every construct added in 0.7.0, and " +
+        "without it this suite reports parity over the old features only.",
+    );
+  }
 
   for (const [name, schema] of Object.entries(SCHEMAS)) {
     it(`emits byte-identical OOXML parts: ${name}`, () => {

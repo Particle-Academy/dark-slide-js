@@ -132,6 +132,15 @@ export class Validator {
             errors.push(err(`${path}/code`, "string", gettype(element.code ?? null), element.code ?? null, "Code element must have a `code` string."));
           }
           break;
+        case "kpiBand":
+        case "metadataGrid":
+          // An items-less composite is not an error the writer can see: it
+          // expands to a table with no rows and renders as a blank rectangle,
+          // which is the worst kind of wrong.
+          if (!Array.isArray(element.items) || element.items.length === 0) {
+            errors.push(err(`${path}/items`, "non-empty array", gettype(element.items ?? null), element.items ?? null, `A \`${element.type}\` must have a non-empty \`items\` array.`));
+          }
+          break;
       }
     }
 

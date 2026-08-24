@@ -4,7 +4,17 @@
  * Validator is the gate.
  */
 
-export type ElementType = "text" | "image" | "chart" | "code" | "table" | "shape" | "embed";
+export type ElementType =
+  | "text"
+  | "image"
+  | "chart"
+  | "code"
+  | "table"
+  | "shape"
+  | "embed"
+  /** Composites — expand into a `table` before the writer sees them. */
+  | "kpiBand"
+  | "metadataGrid";
 
 export interface ThemeColors {
   background?: string;
@@ -78,8 +88,10 @@ export interface SlideElement {
   language?: string;
   codeTheme?: string;
   // table
-  columns?: { key: string; label: string }[];
+  columns?: { key: string; label: string; width?: number; align?: string }[];
   rows?: Record<string, unknown>[];
+  // composites (kpiBand / metadataGrid)
+  items?: Record<string, unknown>[];
   // chart
   option?: Record<string, unknown>;
   chartTheme?: string;

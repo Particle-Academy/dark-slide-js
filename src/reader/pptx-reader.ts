@@ -511,15 +511,36 @@ export class PptxReader {
       return null;
     }
 
-    const headerCells = descendants(rows[0]!, "tc");
-    const columns: { key: string; label: string }[] = [];
-    headerCells.forEach((cell, i) => {
-      const label = this.cellText(cell);
-      columns.push({ key: "col" + (i + 1), label });
-    });
+    // Whether row 0 is a header is DECLARED, not assumed. `a:tblPr/@firstRow`
+    // is the only thing that says so, and header-less tables are ordinary now —
+    // every metadataGrid and kpiBand is one. Assuming a header promoted a row
+    // of DATA to column labels and dropped it from the rows, silently losing
+    // content on the way back in.
+    const tblPr = descendant(tbl, "tblPr");
+    const hasHeader = tblPr !== undefined && (at(tblPr, "firstRow") ?? "0") === "1";
+
+    // Column widths come from the grid, as fractions of the table, so a table
+    // written with unequal columns reads back with them.
+    const gridWidths = descendants(tbl, "gridCol").map((c) => parseInt(at(c, "w") ?? "0", 10) || 0);
+    const gridTotal = gridWidths.reduce((a, b) => a + b, 0);
+
+    const firstCells = descendants(rows[0]!, "tc");
+    const columnCount = Math.max(firstCells.length, gridWidths.length);
+
+    const columns: { key: string; label: string; width?: number }[] = [];
+    for (let i = 0; i < columnCount; i++) {
+      const column: { key: string; label: string; width?: number } = {
+        key: "col" + (i + 1),
+        label: hasHeader && firstCells[i] !== undefined ? this.cellText(firstCells[i]!) : "",
+      };
+      if (gridTotal > 0 && gridWidths[i] !== undefined) {
+        column.width = gridWidths[i]! / gridTotal;
+      }
+      columns.push(column);
+    }
 
     const bodyRows: Record<string, string>[] = [];
-    for (let r = 1; r < rows.length; r++) {
+    for (let r = hasHeader ? 1 : 0; r < rows.length; r++) {
       const rowCells = descendants(rows[r]!, "tc");
       const rowData: Record<string, string> = {};
       columns.forEach((col, i) => {

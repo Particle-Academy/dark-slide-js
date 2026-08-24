@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Agent } from "../src";
@@ -209,6 +209,30 @@ function stripVolatileIds(deck: Any): Any {
   const clone = JSON.parse(JSON.stringify(deck));
   delete clone.id;
   return clone;
+}
+
+/**
+ * The rich-constructs reference deck, loaded from the PHP repository rather
+ * than transcribed here — see the note in parity.test.ts. Without it the reader
+ * comparison covers none of the constructs added in 0.7.0, and a header-less
+ * table (every metadataGrid and kpiBand is one) is exactly where the two
+ * readers most recently disagreed.
+ */
+function referenceDeck(): unknown | null {
+  const srcRoot = process.env.DARK_SLIDE_PHP_SRC ?? join(__dirname, "..", "..", "dark-slide", "src");
+  const file = join(srcRoot, "..", "tests", "fixtures", "reference-deck.json");
+  if (!existsSync(file)) return null;
+  return JSON.parse(readFileSync(file, "utf8")) as unknown;
+}
+
+const REFERENCE = referenceDeck();
+if (REFERENCE !== null) {
+  SCHEMAS.richConstructsReference = REFERENCE;
+} else if (process.env.CI) {
+  throw new Error(
+    "the rich-constructs reference deck was not found next to the PHP sources; " +
+      "reader parity would then cover none of the constructs added in 0.7.0.",
+  );
 }
 
 const HAS_PHP = phpAvailable();
