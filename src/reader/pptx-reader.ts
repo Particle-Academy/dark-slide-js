@@ -73,6 +73,14 @@ function deepText(node: XmlNode): string {
 
 export class PptxReader {
   private currentSlideRels: Record<string, { type: string; target: string }> = {};
+
+  /**
+   * The mono typeface this deck was written with, read back from the theme's
+   * `<a:extLst>`. Empty when the package does not record one — anything not
+   * written by a current DarkSlide — in which case the name sniff below is the
+   * only signal available.
+   */
+  private monoTypeface = "";
   private parts: Record<string, Uint8Array> = {};
 
   /** Read a PPTX file's bytes into a Deck schema object. */
@@ -83,6 +91,30 @@ export class PptxReader {
   fromBytes(bytes: Uint8Array): Record<string, unknown> {
     this.parts = unzipSync(bytes);
     return this.extract();
+  }
+
+  /**
+   * The mono typeface recorded in `theme1.xml`'s `<a:extLst>`, or `""`.
+   *
+   * Deliberately a regex rather than a parse: this runs before the deck is
+   * built, the element is one attribute deep, and a theme part that does not
+   * carry the extension is the common case rather than an error.
+   */
+  private readMonoTypeface(): string {
+    const xml = this.getPart("ppt/theme/theme1.xml");
+    if (xml === false) {
+      return "";
+    }
+
+    const m = /<ds:monoFont[^>]*typeface="([^"]*)"/.exec(xml);
+    return m
+      ? m[1]!
+          .replace(/&quot;/g, '"')
+          .replace(/&apos;/g, "'")
+          .replace(/&lt;/g, "<")
+          .replace(/&gt;/g, ">")
+          .replace(/&amp;/g, "&")
+      : "";
   }
 
   private getPart(name: string): string | false {
@@ -97,6 +129,8 @@ export class PptxReader {
       theme: { name: "imported" },
       slides: [],
     };
+
+    this.monoTypeface = this.readMonoTypeface();
 
     const presentationRels = this.getPart("ppt/_rels/presentation.xml.rels");
     if (presentationRels === false) {
@@ -585,7 +619,7 @@ export class PptxReader {
       return [isBullet ? "- " : "", isBullet];
     }
 
-    const parsed: { text: string; b: boolean; i: boolean; code: boolean }[] = [];
+    let parsed: { text: string; b: boolean; i: boolean; code: boolean }[] = [];
     let allBold = true;
     let allItalic = true;
     let anyNonEmpty = false;
@@ -602,7 +636,24 @@ export class PptxReader {
         const latin = el(rPr, "latin");
         if (latin) {
           const typeface = (at(latin, "typeface") ?? "").toLowerCase();
-          if (typeface.includes("consola") || typeface.includes("mono") || typeface.includes("courier")) {
+          // Exact match against the typeface the deck RECORDED first, then the
+          // name sniff.
+          //
+          // The sniff alone was sound while the writer always emitted Consolas.
+          // Once a deck can name its own mono font it is not: "Fira Code" and
+          // "Cascadia" contain none of these words, so a code run came back as
+          // plain text — a silent downgrade on a file that opens perfectly.
+          //
+          // The sniff stays as the fallback, because it is the only thing that
+          // works for a pptx written by anything else.
+          const recorded = this.monoTypeface.toLowerCase();
+
+          if (
+            (recorded !== "" && typeface === recorded) ||
+            typeface.includes("consola") ||
+            typeface.includes("mono") ||
+            typeface.includes("courier")
+          ) {
             code = true;
           }
         }
@@ -621,6 +672,31 @@ export class PptxReader {
     if (!anyNonEmpty) {
       return [isBullet ? "- " : "", isBullet];
     }
+
+    // Coalesce adjacent runs that carry the SAME decoration.
+    //
+    // DrawingML splits text into runs for reasons that have nothing to do with
+    // emphasis — a syntax highlighter emits one run per token, all of them
+    // code — and emitting a marker per run produces markdown that is not merely
+    // ugly but WRONG. A highlighted `const deck = 1;` came back as
+    // "`const`` deck = ``1``;`", where every pair of adjacent backticks closes
+    // one span and opens the next, so re-parsing it yields the inverse of the
+    // intended emphasis.
+    //
+    // Merging first is also what makes the output stable: the same text reads
+    // the same whether the writer split it into one run or six.
+    const merged: typeof parsed = [];
+    for (const run of parsed) {
+      const last = merged[merged.length - 1];
+
+      if (last && last.b === run.b && last.i === run.i && last.code === run.code) {
+        last.text += run.text;
+        continue;
+      }
+
+      merged.push({ ...run });
+    }
+    parsed = merged;
 
     let line = "";
     let anyDecoration = false;

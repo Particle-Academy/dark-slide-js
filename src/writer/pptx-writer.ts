@@ -102,10 +102,28 @@ export class PptxWriter {
   private mediaFiles: { path: string; bytes: Uint8Array }[] = [];
   /** Ordered list of chart part XML queued for the archive. */
   private chartFiles: { path: string; xml: string }[] = [];
+  /** Extension uri under which the deck's mono typeface is recorded in theme1.xml. */
+  static readonly MONO_FONT_EXT_URI = "urn:particle-academy:dark-slide:mono-font";
+
+  /** Namespace for DarkSlide's own elements inside an `<a:ext>`. */
+  static readonly NS_DARK_SLIDE = "urn:particle-academy:dark-slide";
+
   private themeAccent = "8B5CF6";
 
   /** The deck's theme, kept whole so the table resolver can read its colours. */
   private deckTheme: Any = {};
+
+  /**
+   * Monospace typeface for code runs, from `theme.fonts.mono`.
+   *
+   * There is no third slot in OOXML's `<a:fontScheme>` — a theme carries a
+   * major and a minor font and nothing else — so unlike heading and body this
+   * cannot ride along in theme1.xml and has to be written onto each code run.
+   * That is why it was missed in all three engines: accepted by every
+   * validator, published in the JSON Schema handed to an LLM as the tool
+   * definition, named in the writers' own docblocks, and applied nowhere.
+   */
+  private themeMono = "Consolas";
   private tnId = 0;
   private pendingSlideRels: Record<number, Rel[]> = {};
 
@@ -126,6 +144,8 @@ export class PptxWriter {
     this.pendingSlideRels = {};
     [this.themeAccent] = Color.parse((deck?.theme?.colors?.accent ?? "#8B5CF6") as string, "8B5CF6");
     this.deckTheme = isPlainObject(deck?.theme) ? deck.theme : {};
+    const mono = deck?.theme?.fonts?.mono;
+    this.themeMono = typeof mono === "string" && mono.trim() !== "" ? mono.trim() : "Consolas";
 
     const slides: Any[] = deck?.slides ?? [];
     const slideCount = slides.length;
@@ -359,6 +379,7 @@ export class PptxWriter {
 
     const heading = Xml.attr(String(deck?.theme?.fonts?.heading ?? "Calibri"));
     const body = Xml.attr(String(deck?.theme?.fonts?.body ?? "Calibri"));
+    const mono = Xml.attr(this.themeMono);
 
     const palette = [...CHART_PALETTE];
     palette[0] = accent;
@@ -392,6 +413,13 @@ export class PptxWriter {
       '<a:bgFillStyleLst><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:bgFillStyleLst>' +
       "</a:fmtScheme>" +
       "</a:themeElements>" +
+      // The mono typeface, recorded so the READER can recognise a code run
+      // again. `<a:fontScheme>` has exactly two slots, so there is nowhere in a
+      // standard theme for a third font; `<a:extLst>` is the standard place for
+      // exactly this, and consumers that do not know the uri ignore it.
+      '<a:extLst><a:ext uri="' + PptxWriter.MONO_FONT_EXT_URI + '">' +
+      '<ds:monoFont xmlns:ds="' + PptxWriter.NS_DARK_SLIDE + '" typeface="' + mono + '"/>' +
+      "</a:ext></a:extLst>" +
       "</a:theme>"
     );
   }
@@ -1489,7 +1517,7 @@ export class PptxWriter {
           "<a:r>" +
           '<a:rPr lang="en-US" sz="' + sz + '">' +
           '<a:solidFill><a:srgbClr val="' + color + '"/></a:solidFill>' +
-          '<a:latin typeface="Consolas"/>' +
+          '<a:latin typeface="' + Xml.attr(this.themeMono) + '"/>' +
           "</a:rPr>" +
           "<a:t>" + Xml.text(token.text) + "</a:t>" +
           "</a:r>";
@@ -2165,7 +2193,7 @@ export class PptxWriter {
 
     if (code) {
       color = "8B5CF6";
-      family = '<a:latin typeface="Consolas"/>';
+      family = '<a:latin typeface="' + Xml.attr(this.themeMono) + '"/>';
     }
 
     const rPr =
