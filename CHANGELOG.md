@@ -2,6 +2,31 @@
 
 ## [Unreleased]
 
+## 0.7.2 — 2026-09-13
+
+### Fixed
+
+- **The published schema says what unit every `style` field is in.**
+  `Agent.jsonSchema()` exported `style` as a bare `{ type: "object" }`, so a
+  model filling it in had only the key names, and `fontSize` reads as points. It
+  is design pixels on the 1920px fancy-slides canvas, halved into points with an
+  8pt minimum. In the fancy-labs document lab an agent described its headline as
+  232pt, and the file it wrote carried 116pt.
+
+  The style object also mixes units: `letterSpacing`, `spaceBefore`,
+  `spaceAfter`, `padding`, `radius` and the border and accent-bar widths are
+  already points, and `lineHeight` is a multiple. Every field now carries a
+  description with a worked example, and `x`, `y`, `w` and `h` say they are
+  fractions of the slide.
+
+  **Upgrade and do nothing.** Descriptions and permissive types only: the
+  validator never reads this export and the writer's bytes are unchanged.
+
+  `tests/schema-parity.test.ts` checks each worked example against this writer's
+  XML, and diffs the element position and style schema against the PHP
+  reference (`scripts/php-jsonschema.php`), so the engines cannot describe one
+  field two ways.
+
 ## 0.7.1 — 2026-09-10
 
 ### Fixed

@@ -13,7 +13,7 @@ import { Validator } from "./schema/validator";
 import { PptxWriter } from "./writer/pptx-writer";
 
 /** This package's own version, pinned to package.json by `version.test.ts`. */
-export const VERSION = "0.7.1";
+export const VERSION = "0.7.2";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any;
