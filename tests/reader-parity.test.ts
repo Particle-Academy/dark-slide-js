@@ -264,6 +264,32 @@ describe.skipIf(!HAS_PHP)("cross-engine reader parity (PHP vs TS)", () => {
    * returned for a non-16:9 slide), and `metadata.embeddedFonts` for a file
    * that embeds fonts.
    */
+  it("readers agree on deck content: a 2:1 slide, whose ratio divides exactly", () => {
+    const deck = {
+      id: "deck-read-21",
+      title: "Two by one",
+      metadata: META,
+      theme: { name: "default", aspectRatio: 2 },
+      slides: [
+        {
+          id: "s1",
+          layout: "blank",
+          elements: [{ id: "t", type: "text", x: 0.1, y: 0.5, w: 0.5, h: 0.25, content: "Middle" }],
+        },
+      ],
+    };
+    const bytes = Agent.toBytes(deck);
+    const pptxFile = join(dir, "aspect21.pptx");
+    writeFileSync(pptxFile, bytes);
+
+    const phpDeck = JSON.parse(php([PHP_SCRIPT, pptxFile]).toString("utf8"));
+    const tsDeck = Agent.read(bytes) as Any;
+
+    expect(tsDeck.theme.aspectRatio).toBe(2);
+    expect(phpDeck.theme.aspectRatio).toBe(2);
+    expect(normalize(stripVolatileIds(tsDeck))).toEqual(normalize(stripVolatileIds(phpDeck)));
+  });
+
   it("readers agree on deck content: aspect43 with embedded fonts", () => {
     const deck = {
       id: "deck-read-43",

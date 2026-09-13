@@ -93,6 +93,22 @@ describe("style units in the published schema", () => {
     expect(slideXml({ padding: 32 })).toContain('lIns="152400"'); // 12pt x 12700 EMU
   });
 
+  it("describes the canvas without a version number, and the shape radius with its unit", () => {
+    const schema = Agent.jsonSchema();
+    const slideWidth: string = themeProps(schema).slideWidth.description;
+
+    expect(slideWidth).toContain("1920 by default");
+    expect(slideWidth).toContain("1440 reproduces");
+    // The three engines publish this text identically and ship different
+    // version numbers, so it must not name one of them.
+    expect(slideWidth).not.toMatch(/\b\d+\.\d+\b/);
+
+    const radius: string = elementProps(schema).radius.description ?? "";
+    expect(radius).toContain("design pixels");
+    expect(radius).toContain("8 by default");
+    expect(themeProps(schema).aspectRatio.description).toContain("16/9 by default");
+  });
+
   it("says lineHeight is a multiple, and the file agrees", () => {
     expect(style.properties.lineHeight.description).toContain("1.4 is written as 140%");
     expect(slideXml({ lineHeight: 1.4 })).toContain('<a:spcPct val="140000"/>');
@@ -106,7 +122,7 @@ describe.skipIf(!HAS_PHP)("schema parity (PHP vs TS)", () => {
     const reference = JSON.parse(php([PHP_SCRIPT]));
     const ours = Agent.jsonSchema();
 
-    for (const key of ["x", "y", "w", "h", "style", "strokeWidth"]) {
+    for (const key of ["x", "y", "w", "h", "style", "strokeWidth", "radius"]) {
       expect(elementProps(ours)[key], `element.${key} differs from the PHP reference`).toEqual(elementProps(reference)[key]);
     }
     for (const key of ["slideWidth", "aspectRatio"]) {

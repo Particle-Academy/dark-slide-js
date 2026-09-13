@@ -37,8 +37,9 @@ compares every part byte for byte, fonts included.
   they were fixed at).
 
 - **The published schema describes the design-pixel model**, including
-  `theme.slideWidth`, `theme.aspectRatio` and `strokeWidth`, identical to the PHP
-  reference (`tests/schema-parity.test.ts` diffs them).
+  `theme.slideWidth`, `theme.aspectRatio`, `strokeWidth` and a shape's `radius`,
+  identical to the PHP reference (`tests/schema-parity.test.ts` diffs them). The
+  text names no engine's version number, since all three publish it.
 
 ### Fixed
 
@@ -54,7 +55,9 @@ compares every part byte for byte, fonts included.
 - **Rounded corners are the radius asked for.** A roundRect corner is
   `min(w, h) * adj / 100000`; decorated text boxes divided by half the shorter
   side and drew every corner twice as round. `rounded-rect` shapes now take
-  `radius` (design px, default 8) instead of PowerPoint's default corner.
+  `radius` (design px, default 8) instead of PowerPoint's default corner; a
+  `radius` that is not a number falls back to 8 rather than drawing square
+  corners.
 
 - **The README claimed parity with PHP 0.5.2** and that later additions were not
   mirrored; it now documents the unit model and font embedding.

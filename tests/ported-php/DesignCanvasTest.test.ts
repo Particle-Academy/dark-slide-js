@@ -74,6 +74,21 @@ describe("design canvas", () => {
     );
   });
 
+  it("treats a radius that is not a number as the default, not as square corners", () => {
+    // Casting "abc" to a number gives 0, which drew a rounded-rect with adj 0: a plain rectangle.
+    const shape = { type: "shape", shape: "rounded-rect", w: 0.3, h: 0.2, radius: "abc" };
+
+    expect(dcParts(dcDeck({}, shape)).slide).toContain('<a:gd name="adj" fmla="val 3704"/>');
+  });
+
+  it("reads an aspect ratio back as a number, even when it divides exactly", () => {
+    const deck = Agent.read(Agent.toBytes(dcDeck({ aspectRatio: 2.0 }, {}))) as Any;
+
+    // PHP's reader returned int 2 here until ac2941b; parity pins the agreement.
+    expect(deck.theme.aspectRatio).toBe(2);
+    expect(deck.slides[0].elements[0].y).toBe(0.5);
+  });
+
   it("rounds a decorated text box by min(w, h), not half of it", () => {
     // The PHP rich-text fixture box: 0.88 x 0.18 of a 16:9 slide, shorter side
     // 925830 EMU; 8 design px is 3pt = 38100 EMU; 38100 / 925830 * 100000 = 4115.

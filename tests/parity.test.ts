@@ -482,6 +482,8 @@ SCHEMAS.roundedShapes = {
         { id: "r1", type: "shape", shape: "rounded-rect", x: 0.1, y: 0.1, w: 0.3, h: 0.2, fill: "#1B3A5C" },
         { id: "r2", type: "shape", shape: "rounded-rect", x: 0.5, y: 0.1, w: 0.3, h: 0.2, radius: 64, fill: "#1B3A5C" },
         { id: "r3", type: "shape", shape: "rounded-rect", x: 0.1, y: 0.5, w: 0.3, h: 0.2, radius: 4000, content: "Pill" },
+        // Not a number: both engines fall back to the default 8, not to 0.
+        { id: "r4", type: "shape", shape: "rounded-rect", x: 0.5, y: 0.8, w: 0.2, h: 0.1, radius: "abc" },
         { id: "t", type: "text", x: 0.5, y: 0.5, w: 0.4, h: 0.3, content: "Box", style: { fill: "#E8F2F3", radius: 13 } },
       ],
     },

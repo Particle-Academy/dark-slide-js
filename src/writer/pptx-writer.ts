@@ -1553,7 +1553,8 @@ export class PptxWriter {
     const geometry =
       prst === "roundRect"
         ? roundRectGeometry(
-            toFloat(element.radius ?? 8),
+            // A radius that is not a number falls back to the default, not to 0.
+            isNumeric(element.radius) ? toFloat(element.radius) : 8.0,
             Emu.fromFracX(toFloat(element.w ?? 0)),
             Emu.fromFracY(toFloat(element.h ?? 0), this.slideHeightEmu),
             this.deckTheme,

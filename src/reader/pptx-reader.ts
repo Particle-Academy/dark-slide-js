@@ -143,6 +143,8 @@ export class PptxReader {
     // 16:9 at 10in is the default and says nothing; any other shape is part of
     // the deck and comes back as its aspect ratio.
     if (this.slideWidthEmu !== Emu.DEFAULT_SLIDE_WIDTH || this.slideHeightEmu !== Emu.DEFAULT_SLIDE_HEIGHT) {
+      // A JS number is always a double. PHP casts explicitly, because its
+      // `int / int` is an int when it divides exactly (a 2:1 slide read back as 2).
       deck.theme.aspectRatio = this.slideWidthEmu / this.slideHeightEmu;
     }
 
