@@ -5,11 +5,24 @@ export function isPlainObject(value: unknown): value is Record<string, any> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** PHP `is_numeric` (approx): number, or numeric string with optional leading ws. */
+/** PHP 8's numeric string: ASCII whitespace either side, sign, decimal, exponent. */
+const PHP_NUMERIC = /^[ \t\n\r\v\f]*[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?[ \t\n\r\v\f]*$/;
+
+/**
+ * PHP 8's `is_numeric`, exactly: a finite number, or a string with optional
+ * leading AND trailing ASCII whitespace (space, tab, LF, CR, VT, FF), an optional
+ * sign, and a decimal (`5`, `5.`, `.5`, `5.5`) with an optional exponent.
+ *
+ * It was an approximation that allowed leading whitespace only, rejected `"5."`,
+ * and used `\s`, which also matches a non-breaking space PHP rejects. So `"12 "`
+ * was a number in the PHP reference and the Python port and not here. The table
+ * in tests/util-is-numeric.test.ts was produced by running PHP 8.4.20; the
+ * Python port's `_NUMERIC` is the same pattern.
+ */
 export function isNumeric(v: unknown): boolean {
   if (typeof v === "number") return Number.isFinite(v);
   if (typeof v !== "string") return false;
-  return /^\s*[+-]?(\d+(\.\d+)?|\.\d+)([eE][+-]?\d+)?$/.test(v);
+  return PHP_NUMERIC.test(v);
 }
 
 /** PHP `gettype`-style label used by the validator's `got` field. */

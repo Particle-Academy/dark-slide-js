@@ -59,6 +59,12 @@ compares every part byte for byte, fonts included.
   `radius` that is not a number falls back to 8 rather than drawing square
   corners.
 
+- **Numeric strings are read exactly as PHP 8 reads them.** `isNumeric` accepted
+  leading whitespace only, rejected `"5."`, and matched a non-breaking space
+  through `\s`. So `"12 "` was 12 in the PHP and Python engines and fell back to
+  a default here. It now uses PHP 8's rule; the test table was produced by
+  running PHP 8.4.20.
+
 - **The README claimed parity with PHP 0.5.2** and that later additions were not
   mirrored; it now documents the unit model and font embedding.
 
