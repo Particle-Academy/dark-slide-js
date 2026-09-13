@@ -1,6 +1,9 @@
 export { Agent, VERSION } from "./agent";
 export { DarkSlide } from "./dark-slide";
 export { SchemaException } from "./exceptions";
+export { FontEmbeddingException } from "./fonts/font-embedding-exception";
+export { EmbeddedFonts, FONT_VARIANTS, type FontOptions, type FontSource, type FontVariant } from "./fonts/embedded-fonts";
+export { DesignUnits } from "./helpers/design-units";
 export * from "./schema/types";
 
 // Lower-level building blocks (advanced use / parity with PHP services).

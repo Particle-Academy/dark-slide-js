@@ -75,9 +75,14 @@ function kpiBand(element: Any, theme: Any): Any {
   });
 
   // Only the rule BETWEEN kpis, plus the band's own outline.
+  //
+  // Every length in a composite is DESIGN PIXELS, like the font sizes beside
+  // it. These defaults were points before 0.8; each is doubled, which is
+  // exactly its old size at `theme.slideWidth: 1440` and keeps its proportion
+  // to the text on the default 1920 canvas.
   const borders = style.borders ?? {
-    inner: { width: 0.75, color: themeColor(theme, "muted", "#D9DEE4") },
-    outer: { width: 0.75, color: themeColor(theme, "muted", "#D9DEE4") },
+    inner: { width: 1.5, color: themeColor(theme, "muted", "#D9DEE4") },
+    outer: { width: 1.5, color: themeColor(theme, "muted", "#D9DEE4") },
   };
 
   return {
@@ -94,7 +99,7 @@ function kpiBand(element: Any, theme: Any): Any {
     rows: [
       {
         cells: values,
-        height: style.valueHeight ?? 44,
+        height: style.valueHeight ?? 88,
         fontSize: valueSize,
         color: valueColor,
         bold: true,
@@ -104,7 +109,7 @@ function kpiBand(element: Any, theme: Any): Any {
       },
       {
         cells: captions,
-        height: style.captionHeight ?? 30,
+        height: style.captionHeight ?? 60,
         fontSize: captionSize,
         color: captionColor,
         align,
@@ -116,7 +121,7 @@ function kpiBand(element: Any, theme: Any): Any {
       header: false,
       stripe: false,
       fill,
-      padding: style.padding ?? { left: 8, right: 8, top: 2, bottom: 2 },
+      padding: style.padding ?? { left: 16, right: 16, top: 4, bottom: 4 },
     },
   };
 }
@@ -155,17 +160,18 @@ function metadataGrid(element: Any, theme: Any): Any {
     }
     rows.push({
       cells: labels,
-      height: style.labelHeight ?? 18,
+      // Design pixels throughout; see kpiBand() for why these doubled.
+      height: style.labelHeight ?? 36,
       fontSize: style.labelFontSize ?? 18,
       color: labelColor,
-      letterSpacing: style.labelLetterSpacing ?? 1.2,
+      letterSpacing: style.labelLetterSpacing ?? 2.4,
       caps: "small",
       bold: true,
       anchor: "bottom",
     });
     rows.push({
       cells: values,
-      height: style.valueHeight ?? 26,
+      height: style.valueHeight ?? 52,
       fontSize: style.valueFontSize ?? 28,
       color: valueColor,
       bold: true,
@@ -190,7 +196,7 @@ function metadataGrid(element: Any, theme: Any): Any {
       stripe: false,
       borders: style.borders ?? false,
       fill,
-      padding: style.padding ?? { left: 10, right: 10, top: 2, bottom: 2 },
+      padding: style.padding ?? { left: 20, right: 20, top: 4, bottom: 4 },
     },
   };
 }

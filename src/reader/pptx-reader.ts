@@ -83,6 +83,14 @@ export class PptxReader {
   private monoTypeface = "";
   private parts: Record<string, Uint8Array> = {};
 
+  /**
+   * The slide size from `<p:sldSz>`, so geometry comes back as fractions of THIS
+   * slide. Every conversion used to assume 16:9 at 10in, which read a 4:3 deck's
+   * positions back wrong.
+   */
+  private slideWidthEmu = Emu.DEFAULT_SLIDE_WIDTH;
+  private slideHeightEmu = Emu.DEFAULT_SLIDE_HEIGHT;
+
   /** Read a PPTX file's bytes into a Deck schema object. */
   read(bytes: Uint8Array): Record<string, unknown> {
     return this.fromBytes(bytes);
@@ -131,6 +139,12 @@ export class PptxReader {
     };
 
     this.monoTypeface = this.readMonoTypeface();
+    this.readSlideSize();
+    // 16:9 at 10in is the default and says nothing; any other shape is part of
+    // the deck and comes back as its aspect ratio.
+    if (this.slideWidthEmu !== Emu.DEFAULT_SLIDE_WIDTH || this.slideHeightEmu !== Emu.DEFAULT_SLIDE_HEIGHT) {
+      deck.theme.aspectRatio = this.slideWidthEmu / this.slideHeightEmu;
+    }
 
     const presentationRels = this.getPart("ppt/_rels/presentation.xml.rels");
     if (presentationRels === false) {
@@ -152,7 +166,60 @@ export class PptxReader {
       deck.slides.push(slide);
     });
 
+    // Only when the file embeds any, so every other read is unchanged.
+    const embeddedFonts = this.readEmbeddedFonts();
+    if (embeddedFonts.length > 0) {
+      deck.metadata = { embeddedFonts };
+    }
+
     return deck;
+  }
+
+  private readSlideSize(): void {
+    this.slideWidthEmu = Emu.DEFAULT_SLIDE_WIDTH;
+    this.slideHeightEmu = Emu.DEFAULT_SLIDE_HEIGHT;
+
+    const xml = this.getPart("ppt/presentation.xml");
+    if (xml === false) return;
+    const tag = /<p:sldSz\b[^>]*>/.exec(xml);
+    if (!tag) return;
+
+    const cx = /\bcx="(\d+)"/.exec(tag[0]);
+    if (cx && parseInt(cx[1]!, 10) > 0) this.slideWidthEmu = parseInt(cx[1]!, 10);
+    const cy = /\bcy="(\d+)"/.exec(tag[0]);
+    if (cy && parseInt(cy[1]!, 10) > 0) this.slideHeightEmu = parseInt(cy[1]!, 10);
+  }
+
+  private fracX(emu: number): number {
+    return Emu.toFracX(emu, this.slideWidthEmu);
+  }
+
+  private fracY(emu: number): number {
+    return Emu.toFracY(emu, this.slideHeightEmu);
+  }
+
+  /**
+   * The typefaces the file embeds and which of the four variants each carries.
+   *
+   * Names and variants only, never the font bytes: a reader's output is a deck,
+   * and a deck is agent-facing JSON that has no business holding licensed
+   * binaries.
+   */
+  private readEmbeddedFonts(): { typeface: string; variants: string[] }[] {
+    const xml = this.getPart("ppt/presentation.xml");
+    if (xml === false) return [];
+    const list = /<p:embeddedFontLst>([\s\S]*?)<\/p:embeddedFontLst>/.exec(xml);
+    if (!list) return [];
+
+    const fonts: { typeface: string; variants: string[] }[] = [];
+    for (const entry of list[1]!.matchAll(/<p:embeddedFont>([\s\S]*?)<\/p:embeddedFont>/g)) {
+      const face = /<p:font\b[^>]*\btypeface="([^"]*)"/.exec(entry[1]!);
+      if (!face) continue;
+      const variants = [...entry[1]!.matchAll(/<p:(regular|bold|italic|boldItalic)\b/g)].map((m) => m[1]!);
+      fonts.push({ typeface: decodeXmlAttr(face[1]!), variants });
+    }
+
+    return fonts;
   }
 
   private parseSlideRels(relsXml: string, slideTargetRelative: string): Record<string, { type: string; target: string }> {
@@ -427,10 +494,10 @@ export class PptxReader {
     const cNvPr = descendant(sp, "cNvPr");
     const base: Record<string, Any> = {
       id: cNvPr ? at(cNvPr, "name") ?? "imported-" + randInt(1000, 9999) : "imported-" + randInt(1000, 9999),
-      x: Emu.toFracX(x),
-      y: Emu.toFracY(y),
-      w: Emu.toFracX(cx),
-      h: Emu.toFracY(cy),
+      x: this.fracX(x),
+      y: this.fracY(y),
+      w: this.fracX(cx),
+      h: this.fracY(cy),
     };
 
     const tBody = descendant(sp, "txBody");
@@ -515,10 +582,10 @@ export class PptxReader {
     return {
       id: cNvPr ? at(cNvPr, "name") ?? "imported-" + randInt(1000, 9999) : "imported-" + randInt(1000, 9999),
       type: "image",
-      x: Emu.toFracX(parseInt(at(offset, "x") ?? "0", 10) || 0),
-      y: Emu.toFracY(parseInt(at(offset, "y") ?? "0", 10) || 0),
-      w: Emu.toFracX(parseInt(at(extent, "cx") ?? "0", 10) || 0),
-      h: Emu.toFracY(parseInt(at(extent, "cy") ?? "0", 10) || 0),
+      x: this.fracX(parseInt(at(offset, "x") ?? "0", 10) || 0),
+      y: this.fracY(parseInt(at(offset, "y") ?? "0", 10) || 0),
+      w: this.fracX(parseInt(at(extent, "cx") ?? "0", 10) || 0),
+      h: this.fracY(parseInt(at(extent, "cy") ?? "0", 10) || 0),
       src,
       fit: "contain",
     };
@@ -591,10 +658,10 @@ export class PptxReader {
     return {
       id: cNvPr ? at(cNvPr, "name") ?? "imported-table-" + randInt(1000, 9999) : "imported-table-" + randInt(1000, 9999),
       type: "table",
-      x: Emu.toFracX(parseInt(at(offset, "x") ?? "0", 10) || 0),
-      y: Emu.toFracY(parseInt(at(offset, "y") ?? "0", 10) || 0),
-      w: Emu.toFracX(parseInt(at(extent, "cx") ?? "0", 10) || 0),
-      h: Emu.toFracY(parseInt(at(extent, "cy") ?? "0", 10) || 0),
+      x: this.fracX(parseInt(at(offset, "x") ?? "0", 10) || 0),
+      y: this.fracY(parseInt(at(offset, "y") ?? "0", 10) || 0),
+      w: this.fracX(parseInt(at(extent, "cx") ?? "0", 10) || 0),
+      h: this.fracY(parseInt(at(extent, "cy") ?? "0", 10) || 0),
       columns,
       rows: bodyRows,
     };
@@ -743,4 +810,16 @@ function round1(x: number): number {
 /** PHP `(string)` of a float — JS `String` already drops trailing `.0`. */
 function numToStr(n: number): string {
   return String(n);
+}
+
+/** An attribute value's XML entities, as PHP's `html_entity_decode(..., ENT_QUOTES | ENT_XML1)` reads them. */
+function decodeXmlAttr(value: string): string {
+  return value
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex: string) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, dec: string) => String.fromCodePoint(parseInt(dec, 10)))
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&");
 }

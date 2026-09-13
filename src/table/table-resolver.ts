@@ -18,13 +18,21 @@
  * A key that is ABSENT falls through. A key present with the value `false`
  * stops the chain and means "off" — which is why this code tests key presence
  * rather than truthiness in the places it does.
+ *
+ * Units: authored lengths (`fontSize`, `letterSpacing`, `padding`, border
+ * `width`, row `height` / `rowHeight`) are design pixels, like every other
+ * length in a deck, and come out in points through `DesignUnits`. The defaults
+ * below that are already points (insets, rule width, minimum row heights) stay
+ * points; only `DEFAULT_FONT_SIZE` is a design-pixel default.
  */
 import { Color } from "../helpers/color";
+import { DesignUnits } from "../helpers/design-units";
 import { isNumeric, isPlainObject } from "../util";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any;
 
+/** Design pixels, like an authored `fontSize`: 10.5pt on the default 1920 canvas. */
 export const DEFAULT_FONT_SIZE = 28;
 export const DEFAULT_BODY_COLOR = "#0F172A";
 export const DEFAULT_HEADER_COLOR = "#FFFFFF";
@@ -157,12 +165,13 @@ export const TableResolver = {
             firstCol: c === 0,
             lastCol: c === columns.length - 1,
           },
+          theme,
         ),
       );
 
       rows.push({
         header: isHeader,
-        height: rowHeight(rowSource, bandStyle, tableStyle, isHeader),
+        height: rowHeight(rowSource, bandStyle, tableStyle, isHeader, theme),
         cells,
       });
     });
@@ -341,7 +350,7 @@ function scalarText(value: Any): string {
 
 // ─── One cell ───────────────────────────────────────────────────────────────
 
-function resolveCell(slot: Slot, chain: Any[], edges: Record<string, boolean>): ResolvedCell {
+function resolveCell(slot: Slot, chain: Any[], edges: Record<string, boolean>, theme: Any = {}): ResolvedCell {
   const spec = slot.spec;
   const layers = [...chain, styleKeys(spec)];
 
@@ -361,12 +370,12 @@ function resolveCell(slot: Slot, chain: Any[], edges: Record<string, boolean>): 
     fill: fill === false || fill === null || fill === "none" ? null : hex(fill, "FFFFFF"),
     align: alignOf(resolved.align ?? "left"),
     anchor: anchorOf(resolved.anchor ?? "middle"),
-    fontSize: Math.max(1, Number(resolved.fontSize ?? DEFAULT_FONT_SIZE) / 2),
-    letterSpacing: Number(resolved.letterSpacing ?? 0),
+    fontSize: DesignUnits.fontPt(Number(resolved.fontSize ?? DEFAULT_FONT_SIZE), theme),
+    letterSpacing: DesignUnits.toPt(Number(resolved.letterSpacing ?? 0), theme),
     caps: capsOf(resolved.caps ?? "none"),
     fontFamily: resolved.fontFamily !== undefined && resolved.fontFamily !== null ? String(resolved.fontFamily) : null,
-    padding: resolvePadding(resolved.padding ?? null),
-    borders: resolveBorders(layers, edges),
+    padding: resolvePadding(resolved.padding ?? null, theme),
+    borders: resolveBorders(layers, edges, theme),
     colSpan: slot.colSpan,
     rowSpan: slot.rowSpan,
     merged: slot.merged,
@@ -377,7 +386,7 @@ function resolveCell(slot: Slot, chain: Any[], edges: Record<string, boolean>): 
  * Per-side border resolution. The whole point of the module, and the part
  * `last-word` needs identically.
  */
-function resolveBorders(layers: Any[], edges: Record<string, boolean>): ResolvedCell["borders"] {
+function resolveBorders(layers: Any[], edges: Record<string, boolean>, theme: Any = {}): ResolvedCell["borders"] {
   const sides: [keyof ResolvedCell["borders"], string][] = [
     ["left", "firstCol"],
     ["right", "lastCol"],
@@ -389,7 +398,10 @@ function resolveBorders(layers: Any[], edges: Record<string, boolean>): Resolved
 
   for (const [side, edgeKey] of sides) {
     const isOuter = edges[edgeKey]!;
-    let value: Any = { width: DEFAULT_BORDER_WIDTH, color: DEFAULT_BORDER_COLOR };
+    // No `width` here on purpose: an absent width is the DEFAULT, in points,
+    // while a stated one is design pixels. Seeding the default width would make
+    // `borderSide()` convert it as though authored.
+    let value: Any = { color: DEFAULT_BORDER_COLOR };
 
     for (const layer of layers) {
       if (!("borders" in layer)) continue;
@@ -415,17 +427,17 @@ function resolveBorders(layers: Any[], edges: Record<string, boolean>): Resolved
       if (side in spec) value = spec[side];
     }
 
-    out[side] = borderSide(value);
+    out[side] = borderSide(value, theme);
   }
 
   return out;
 }
 
-function borderSide(value: Any): ResolvedBorder | null {
+function borderSide(value: Any, theme: Any = {}): ResolvedBorder | null {
   if (value === false || value === null || value === undefined || value === "none") return null;
   if (!isPlainObject(value)) return null;
 
-  const width = isNumeric(value.width) ? Number(value.width) : DEFAULT_BORDER_WIDTH;
+  const width = isNumeric(value.width) ? DesignUnits.toPt(Number(value.width), theme) : DEFAULT_BORDER_WIDTH;
   if (width <= 0) return null;
 
   const style = String(value.style ?? "solid");
@@ -437,7 +449,7 @@ function borderSide(value: Any): ResolvedBorder | null {
   };
 }
 
-function resolvePadding(padding: Any): ResolvedCell["padding"] {
+function resolvePadding(padding: Any, theme: Any = {}): ResolvedCell["padding"] {
   const out = {
     left: DEFAULT_PADDING_X,
     right: DEFAULT_PADDING_X,
@@ -446,12 +458,12 @@ function resolvePadding(padding: Any): ResolvedCell["padding"] {
   };
 
   if (isNumeric(padding)) {
-    const v = Number(padding);
+    const v = DesignUnits.toPt(Number(padding), theme);
     return { left: v, right: v, top: v, bottom: v };
   }
   if (isPlainObject(padding)) {
     for (const side of ["left", "right", "top", "bottom"] as const) {
-      if (isNumeric(padding[side])) out[side] = Number(padding[side]);
+      if (isNumeric(padding[side])) out[side] = DesignUnits.toPt(Number(padding[side]), theme);
     }
   }
 
@@ -474,9 +486,9 @@ function styleKeys(source: Any): Any {
   return out;
 }
 
-function rowHeight(rowSource: Any, bandStyle: Any, tableStyle: Any, isHeader: boolean): number {
+function rowHeight(rowSource: Any, bandStyle: Any, tableStyle: Any, isHeader: boolean, theme: Any = {}): number {
   for (const candidate of [rowSource?.height, bandStyle?.height, tableStyle?.rowHeight]) {
-    if (isNumeric(candidate)) return Number(candidate);
+    if (isNumeric(candidate)) return DesignUnits.toPt(Number(candidate), theme);
   }
   return isHeader ? DEFAULT_HEADER_HEIGHT : DEFAULT_BODY_HEIGHT;
 }

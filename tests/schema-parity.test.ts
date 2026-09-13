@@ -9,14 +9,16 @@ type Any = any;
 /**
  * What the published schema tells a model about units, and whether it is true.
  *
- * `style` was exported as a bare `{ type: "object" }`. A model filling it in had
- * only the key names, and `fontSize` reads as points while every engine treats
- * it as design pixels and halves it (trap 5). In the fancy-labs document lab an
- * agent described its headline as 232pt and the file carried 116pt.
+ * `style` was exported as a bare `{ type: "object" }` until 0.7.2. A model
+ * filling it in had only the key names, and `fontSize` reads as points: in the
+ * fancy-labs document lab an agent described its headline as 232pt and the file
+ * carried 116pt. 0.8 gave every length in the object one unit, the design pixel,
+ * and the descriptions say so with worked examples.
  *
  * Two guarantees:
- *   - the element position and style schema is IDENTICAL to the PHP reference's,
- *     so the engines cannot describe one field two ways;
+ *   - the element position/size/style/strokeWidth schema and the theme's canvas
+ *     fields are IDENTICAL to the PHP reference's, so the engines cannot describe
+ *     one field two ways;
  *   - the worked examples those descriptions quote are what THIS writer emits.
  */
 
@@ -36,6 +38,7 @@ function phpAvailable(): boolean {
 }
 
 const elementProps = (schema: Any): Any => schema.properties.slides.items.properties.elements.items.properties;
+const themeProps = (schema: Any): Any => schema.properties.theme.properties;
 
 function slideXml(style: Record<string, unknown>): string {
   const bytes = Agent.toBytes({
@@ -58,27 +61,36 @@ function slideXml(style: Record<string, unknown>): string {
 describe("style units in the published schema", () => {
   const style = elementProps(Agent.jsonSchema()).style;
 
-  it("says fontSize is design pixels halved into points, and the file agrees", () => {
-    const description: string = style.properties.fontSize.description;
-    expect(description).toContain("DESIGN PIXELS");
-    expect(description).toContain("96 is written as 48pt");
-    expect(description).toContain("24 as 12pt");
-    expect(description).toContain("anything under 16 as 8pt");
-
-    expect(slideXml({ fontSize: 96 })).toContain('sz="4800"');
-    expect(slideXml({ fontSize: 24 })).toContain('sz="1200"');
-    expect(slideXml({ fontSize: 10 })).toContain('sz="800"');
+  it("says every length is a design pixel on the canvas", () => {
+    expect(style.description).toContain("DESIGN PIXELS");
+    expect(style.description).toContain("points = px x 720 / slideWidth");
+    for (const key of ["letterSpacing", "spaceBefore", "spaceAfter", "radius", "padding"]) {
+      expect(style.properties[key].description, key).toContain("design pixels");
+    }
   });
 
-  it("says which fields are already points, and the file agrees", () => {
-    expect(style.properties.letterSpacing.description).toContain("2 is written as 2pt");
-    expect(slideXml({ letterSpacing: 2 })).toContain('spc="200"');
+  it("says what fontSize is written as, and the file agrees", () => {
+    const description: string = style.properties.fontSize.description;
+    expect(description).toContain("96 is written as 36pt");
+    expect(description).toContain("28 as 10.5pt");
+    expect(description).toContain("never below 1pt");
+    expect(description).toContain("Default 28");
 
-    expect(style.properties.spaceBefore.description).toContain("6 is written as 6pt");
-    expect(slideXml({ spaceBefore: 6 })).toContain('<a:spcBef><a:spcPts val="600"/></a:spcBef>');
+    expect(slideXml({ fontSize: 96 })).toContain('sz="3600"');
+    expect(slideXml({ fontSize: 28 })).toContain('sz="1050"');
+    expect(slideXml({})).toContain('sz="1050"');
+    expect(slideXml({ fontSize: 2 })).toContain('sz="100"');
+  });
 
-    expect(style.properties.padding.description).toContain("12 is written as 12pt");
-    expect(slideXml({ padding: 12 })).toContain('lIns="152400"'); // 12pt x 12700 EMU
+  it("says what the other lengths are written as, and the file agrees", () => {
+    expect(style.properties.letterSpacing.description).toContain("8 is written as 3pt");
+    expect(slideXml({ letterSpacing: 8 })).toContain('spc="300"');
+
+    expect(style.properties.spaceBefore.description).toContain("16 is written as 6pt");
+    expect(slideXml({ spaceBefore: 16 })).toContain('<a:spcBef><a:spcPts val="600"/></a:spcBef>');
+
+    expect(style.properties.padding.description).toContain("32 is written as 12pt");
+    expect(slideXml({ padding: 32 })).toContain('lIns="152400"'); // 12pt x 12700 EMU
   });
 
   it("says lineHeight is a multiple, and the file agrees", () => {
@@ -90,15 +102,19 @@ describe("style units in the published schema", () => {
 const HAS_PHP = phpAvailable();
 
 describe.skipIf(!HAS_PHP)("schema parity (PHP vs TS)", () => {
-  it("describes element position, size and style exactly as the PHP reference does", () => {
-    const reference = elementProps(JSON.parse(php([PHP_SCRIPT])));
-    const ours = elementProps(Agent.jsonSchema());
+  it("describes element position, size, style and outline, and the theme canvas, exactly as the PHP reference does", () => {
+    const reference = JSON.parse(php([PHP_SCRIPT]));
+    const ours = Agent.jsonSchema();
 
-    for (const key of ["x", "y", "w", "h", "style"]) {
-      expect(ours[key], `element.${key} differs from the PHP reference`).toEqual(reference[key]);
+    for (const key of ["x", "y", "w", "h", "style", "strokeWidth"]) {
+      expect(elementProps(ours)[key], `element.${key} differs from the PHP reference`).toEqual(elementProps(reference)[key]);
+    }
+    for (const key of ["slideWidth", "aspectRatio"]) {
+      expect(themeProps(ours)[key], `theme.${key} differs from the PHP reference`).toEqual(themeProps(reference)[key]);
     }
     // The comparison has to be over something, or it passes on two empty exports.
-    expect(Object.keys(reference.style.properties ?? {})).toContain("fontSize");
+    expect(Object.keys(elementProps(reference).style.properties ?? {})).toContain("fontSize");
+    expect(themeProps(reference).slideWidth.description).toContain("1920");
   });
 });
 

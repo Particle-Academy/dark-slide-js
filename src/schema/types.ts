@@ -4,6 +4,8 @@
  * Validator is the gate.
  */
 
+import type { FontOptions } from "../fonts/embedded-fonts";
+
 export type ElementType =
   | "text"
   | "image"
@@ -147,4 +149,10 @@ export interface WriteResult {
 export interface WriteOptions {
   tempDir?: string;
   allowHttpImages?: boolean;
+  /**
+   * Fonts to embed in the file, by the typeface name the deck references:
+   * `{ "Bebas Neue": { regular: bytes, bold: bytes } }`. Bytes only (this
+   * package never reads a path); the PHP engine also accepts a file path.
+   */
+  fonts?: FontOptions;
 }

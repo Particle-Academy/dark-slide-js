@@ -4,6 +4,7 @@ import { mkdtempSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Agent } from "../src";
+import { generatedFont } from "./support/generated-font";
 
 // Cross-engine READER parity: for the same .pptx file, the PHP dark-slide
 // reader (scripts/php-read.php) and this TS port's reader should recover the
@@ -256,6 +257,49 @@ describe.skipIf(!HAS_PHP)("cross-engine reader parity (PHP vs TS)", () => {
       expect(normalize(stripVolatileIds(tsDeck))).toEqual(normalize(stripVolatileIds(phpDeck)));
     });
   }
+
+  /**
+   * The 0.8 reader additions, compared against the PHP reader on the same bytes:
+   * geometry read against the file's own `<p:sldSz>` (and `theme.aspectRatio`
+   * returned for a non-16:9 slide), and `metadata.embeddedFonts` for a file
+   * that embeds fonts.
+   */
+  it("readers agree on deck content: aspect43 with embedded fonts", () => {
+    const deck = {
+      id: "deck-read-43",
+      title: "Four by three, with fonts",
+      metadata: META,
+      theme: { name: "default", aspectRatio: 4 / 3 },
+      slides: [
+        {
+          id: "s1",
+          layout: "blank",
+          elements: [
+            { id: "t", type: "text", x: 0.1, y: 0.5, w: 0.5, h: 0.25, content: "Middle", style: { fontFamily: "Qvx Display" } },
+            { id: "r", type: "shape", shape: "rounded-rect", x: 0.6, y: 0.25, w: 0.3, h: 0.5, radius: 24 },
+          ],
+        },
+      ],
+    };
+    const bytes = Agent.toBytes(deck, {
+      fonts: {
+        "Qvx Display": {
+          regular: generatedFont("Qvx Display"),
+          italic: generatedFont("Qvx Display", { style: "Italic", italic: true }),
+        },
+      },
+    });
+    const pptxFile = join(dir, "aspect43-fonts.pptx");
+    writeFileSync(pptxFile, bytes);
+
+    const phpDeck = JSON.parse(php([PHP_SCRIPT, pptxFile]).toString("utf8"));
+    const tsDeck = Agent.read(bytes) as Any;
+
+    // Both have to be reading the new fields, or agreement proves nothing.
+    expect(tsDeck.theme.aspectRatio).toBe(4 / 3);
+    expect(tsDeck.metadata.embeddedFonts).toEqual([{ typeface: "Qvx Display", variants: ["regular", "italic"] }]);
+    expect(normalize(stripVolatileIds(tsDeck))).toEqual(normalize(stripVolatileIds(phpDeck)));
+  });
 });
 
 /**

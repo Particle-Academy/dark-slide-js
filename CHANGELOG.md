@@ -2,6 +2,98 @@
 
 ## [Unreleased]
 
+## 0.8.0 — 2026-09-13
+
+**BREAKING, for how big things are, not for any API.** Pre-1.0, so this lands in
+a minor. Ports `particle-academy/dark-slide` 0.10 exactly; the parity suite
+compares every part byte for byte, fonts included.
+
+### Changed
+
+- **BREAKING: decks are drawn at the size fancy-slides draws them.** Every length
+  in a deck is now a design pixel on a canvas `theme.slideWidth` wide (1920 by
+  default) and converts as `points = px × 720 / slideWidth`. `fontSize: 96` is
+  36pt, 5% of the slide width, which is what fancy-slides shows.
+
+  Before, `fontSize` was halved into points with an 8pt floor (96 → 48pt, a third
+  larger than the preview) and every other length was taken as points, so one
+  style object mixed two units. Now converted identically: `fontSize`,
+  `strokeWidth`, `letterSpacing`, `spaceBefore`, `spaceAfter`, `padding`,
+  `radius`, border and accent-bar widths, and table row heights. The floor is 1pt
+  (PPTX's minimum). Built-in defaults that are PowerPoint's own (text insets, a
+  1pt outline, a 0.75pt table rule, minimum row heights, a 4pt accent bar) stay in
+  points.
+
+  **What to do:** nothing, if your decks were designed in fancy-slides; they now
+  match it. To keep a 0.7 deck's output exactly, set `theme.slideWidth: 1440` and
+  double every length you had written in points (the list above, minus
+  `fontSize`). Composites (`kpiBand`, `metadataGrid`) already did this to their
+  own defaults, so at 1440 they render as before.
+
+- **The text default is 28 design px** (10.5pt), fancy-slides' own default,
+  instead of 24.
+
+- **Code blocks take `style.fontSize`**, default 32 design px (12pt, the size
+  they were fixed at).
+
+- **The published schema describes the design-pixel model**, including
+  `theme.slideWidth`, `theme.aspectRatio` and `strokeWidth`, identical to the PHP
+  reference (`tests/schema-parity.test.ts` diffs them).
+
+### Fixed
+
+- **`theme.aspectRatio` shapes the slide.** It was validated, published in the
+  schema and ignored, so a 4:3 deck came out stretched onto 16:9. The slide stays
+  10in wide; 16:9, 16:10 and 4:3 get PowerPoint's named `<p:sldSz type>`, any
+  other ratio a custom size.
+
+- **The reader reads geometry against the file's own slide size** (`<p:sldSz>`)
+  instead of assuming 16:9, and returns `theme.aspectRatio` for any other shape.
+  A 4:3 deck's `y` of 0.5 used to read back as 0.667.
+
+- **Rounded corners are the radius asked for.** A roundRect corner is
+  `min(w, h) * adj / 100000`; decorated text boxes divided by half the shorter
+  side and drew every corner twice as round. `rounded-rect` shapes now take
+  `radius` (design px, default 8) instead of PowerPoint's default corner.
+
+- **The README claimed parity with PHP 0.5.2** and that later additions were not
+  mirrored; it now documents the unit model and font embedding.
+
+### Added
+
+- **Embed the host's fonts in the file**, so brand typography survives machines
+  that do not have it installed:
+
+  ```ts
+  Agent.toBytes(deck, {
+    fonts: {
+      "Bebas Neue": { regular: bebasRegular },
+      Inter: { regular: interRegular, bold: interBold },
+    },
+  });
+  ```
+
+  Variants `regular`, `bold`, `italic`, `boldItalic`, each a `Uint8Array` or
+  `ArrayBuffer` (this package never reads a path; the PHP engine also accepts
+  one). The deck itself never carries a font.
+
+  Written as uncompressed Embedded OpenType in `ppt/fonts/fontN.fntdata`, with
+  `<p:embeddedFontLst>` and `embedTrueTypeFonts="1"`. **Verified by rendering in
+  LibreOffice 26**; **not verified in PowerPoint or Google Slides**.
+
+  Refused, all at once and before anything is written, with an exported
+  `FontEmbeddingException`: fonts whose licence (`fsType`) forbids embedding or
+  allows bitmaps only, CFF-outline `.otf` and `.ttc` collections, and a file whose
+  family name is not the typeface it was supplied for.
+
+  `Agent.read()` reports embedded typefaces and variants in
+  `metadata.embeddedFonts`, never the bytes.
+
+  **Nothing changes for a deck written without `fonts`**: same parts, same bytes.
+
+- `DesignUnits`, `EmbeddedFonts`, `FontEmbeddingException` and the font option
+  types are exported.
+
 ## 0.7.2 — 2026-09-13
 
 ### Fixed

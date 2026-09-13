@@ -5,6 +5,7 @@
  */
 
 import { SchemaException } from "./exceptions";
+import { EmbeddedFonts } from "./fonts/embedded-fonts";
 import { PptxReader } from "./reader/pptx-reader";
 import { Repairer } from "./schema/repairer";
 import { Schema } from "./schema/schema";
@@ -13,7 +14,7 @@ import { Validator } from "./schema/validator";
 import { PptxWriter } from "./writer/pptx-writer";
 
 /** This package's own version, pinned to package.json by `version.test.ts`. */
-export const VERSION = "0.7.2";
+export const VERSION = "0.8.0";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any;
@@ -22,8 +23,19 @@ function toU8(input: Uint8Array | ArrayBuffer): Uint8Array {
   return input instanceof Uint8Array ? input : new Uint8Array(input);
 }
 
+/**
+ * `fonts` embeds typefaces in the file: `typeface => { variant: bytes }`,
+ * variants `regular`, `bold`, `italic`, `boldItalic`. See `EmbeddedFonts`. A
+ * font that cannot be embedded throws `FontEmbeddingException` before anything
+ * is written.
+ */
 function makeWriter(options: WriteOptions = {}): PptxWriter {
-  return new PptxWriter(options.tempDir ?? null, options.allowHttpImages ?? false);
+  const fonts = options.fonts;
+  return new PptxWriter(
+    options.tempDir ?? null,
+    options.allowHttpImages ?? false,
+    fonts !== undefined && fonts !== null && Object.keys(fonts).length > 0 ? EmbeddedFonts.fromOptions(fonts) : null,
+  );
 }
 
 function assertValid(deck: Any): void {

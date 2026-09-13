@@ -110,10 +110,32 @@ ADJACENT positions is a hard edge, so `box-decoration.ts` paints the bar and the
 tint in ONE shape — no extra element, no z-order for the author to get right,
 and no second shape id for the animation builder to renumber.
 
-### 5. `fontSize` is HALVED into points, everywhere
+### 5. Every length is a design pixel, converted in ONE place
 
-`fancy-slides` designs against a 1920px width; PPTX renders ~720px at 10 inches.
-`fontSize: 26` is 13pt. A schema-wide convention, not a table quirk.
+`helpers/design-units.ts` `DesignUnits.toPt()` is `px * 720 / designWidth`, where
+`designWidth` is `theme.slideWidth ?? 1920` and 720 is the 10in slide in points.
+`fontSize: 96` is 36pt, 5% of the slide width in PowerPoint and fancy-slides alike.
+
+- It applies to every AUTHORED length: `fontSize` (floor 1pt), `strokeWidth`,
+  `letterSpacing`, `spaceBefore`/`spaceAfter`, `padding`, `radius` (text boxes AND
+  `rounded-rect` shapes, through the shared `roundRectGeometry`), border and
+  accent-bar widths, table row heights, and the composites' own defaults.
+- It does NOT apply to PowerPoint-native defaults nobody authored: the 7.2pt /
+  3.6pt insets, a 1pt box outline, a 0.75pt table rule, 40pt / 30pt minimum rows,
+  a 4pt accent bar, the 8pt gutter.
+- Keep the operation order `px * 720 / width`, identical to PHP and Python. Every
+  EMU and hundredths-of-a-point value is rounded from it, and the default canvas
+  lands on exact ties (1px = 0.375pt = 4762.5 EMU) where a different order could
+  cross a rounding boundary. `canvasDefaultLengths` in the parity suite pins them.
+- `theme.aspectRatio` shapes the slide height (`DesignUnits.slideHeightEmu()`), so
+  every Y conversion takes `this.slideHeightEmu`, never the 16:9 default; the
+  reader parses `<p:sldSz>` for the same reason.
+- A roundRect corner is `min(w, h) * adj / 100000` (LibreOffice's preset table).
+  It used to divide by HALF the shorter side.
+
+**Until 0.8 this was a halving** (`fontSize / 2`, 8pt floor) with every other
+length taken as points. `theme.slideWidth: 1440` reproduces the old halving
+exactly; the PHP reference fixture uses it with its former point lengths doubled.
 
 ### 6. `Math.round` is not PHP's `round`
 
@@ -142,6 +164,28 @@ Where the engines already disagree, the Python port follows PHP so the tally
 stays 2-1 rather than becoming a three-way split. The live ones are listed in
 `dark-slide-py/AGENTS.md`; do not "fix" one of them here without landing all
 three.
+
+## Embedded fonts (`src/fonts/`)
+
+Opt-in through the write options (`fonts: { typeface: { variant: bytes } }`),
+never through the deck: an agent names a face, the host supplies the licensed
+file. Bytes only here (isomorphic); the PHP engine also accepts a path.
+
+- **`.fntdata` is an EOT, not a `.ttf`.** Verified by rendering in LibreOffice 26:
+  an uncompressed EOT renders the embedded face; the same font stored raw falls
+  back. The opt-in render test (`DARK_SLIDE_RENDER=1`) checks this writer's
+  output through LibreOffice.
+- **Byte-identical to PHP**, header included (charset 1, NUL-terminated UTF-16LE
+  names). The `embeddedFonts` parity case compares `.fntdata` as BYTES; the
+  shared part comparison decodes only `.xml` / `.rels`, because a binary decoded
+  through UTF-8 can read equal when it is not.
+- **Refusals match PHP's text** and are collected and thrown together as
+  `FontEmbeddingException` before anything is written.
+- **No font supplied means no byte changes.** `embedTrueTypeFonts="1"` replaces
+  `saveSubsetFonts="1"` only when a font is embedded.
+- **PowerPoint and Google Slides are not verified.**
+- Tests generate their own TrueType font (`tests/support/generated-font.ts`),
+  byte-identical to PHP's `tests/Support/GeneratedFont`.
 
 ## Testing
 

@@ -6,7 +6,9 @@
  */
 
 import { ChartTranslator, type ChartSpec } from "../helpers/chart-translator";
+import { EmbeddedFonts } from "../fonts/embedded-fonts";
 import { Color } from "../helpers/color";
+import { DesignUnits } from "../helpers/design-units";
 import { Emu } from "../helpers/emu";
 import { MarkdownInline } from "../helpers/markdown-inline";
 import { SyntaxHighlighter } from "../helpers/syntax-highlighter";
@@ -14,7 +16,7 @@ import { Xml } from "../helpers/xml";
 import { Schema } from "../schema/schema";
 import { Composites } from "../table/composites";
 import { TableResolver, type ResolvedCell } from "../table/table-resolver";
-import { BoxDecoration } from "../text/box-decoration";
+import { BoxDecoration, roundRectGeometry } from "../text/box-decoration";
 import { isNumeric, isPlainObject } from "../util";
 import { zipSync } from "../zip";
 
@@ -40,6 +42,9 @@ const LAYOUT_ORDER = [
 const CHART_PALETTE = ["8B5CF6", "EC4899", "06B6D4", "F59E0B", "10B981", "3B82F6", "EF4444", "A855F7"];
 
 const ENCODER = new TextEncoder();
+
+/** `<p:embeddedFont>`'s variant children, in the order `CT_EmbeddedFontListEntry` requires. */
+const FONT_VARIANT_ORDER = ["regular", "bold", "italic", "boldItalic"] as const;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any;
@@ -110,8 +115,11 @@ export class PptxWriter {
 
   private themeAccent = "8B5CF6";
 
-  /** The deck's theme, kept whole so the table resolver can read its colours. */
+  /** The deck's theme, kept whole so the table resolver can read its colours and DesignUnits its canvas. */
   private deckTheme: Any = {};
+
+  /** Slide height in EMU: 10in wide, `theme.aspectRatio` decides the rest. */
+  private slideHeightEmu = Emu.DEFAULT_SLIDE_HEIGHT;
 
   /**
    * Monospace typeface for code runs, from `theme.fonts.mono`.
@@ -130,6 +138,7 @@ export class PptxWriter {
   constructor(
     private tempDir: string | null = null,
     private allowHttpImages = false,
+    private fonts: EmbeddedFonts | null = null,
   ) {}
 
   write(): never {
@@ -144,6 +153,7 @@ export class PptxWriter {
     this.pendingSlideRels = {};
     [this.themeAccent] = Color.parse((deck?.theme?.colors?.accent ?? "#8B5CF6") as string, "8B5CF6");
     this.deckTheme = isPlainObject(deck?.theme) ? deck.theme : {};
+    this.slideHeightEmu = DesignUnits.slideHeightEmu(this.deckTheme);
     const mono = deck?.theme?.fonts?.mono;
     this.themeMono = typeof mono === "string" && mono.trim() !== "" ? mono.trim() : "Consolas";
 
@@ -170,14 +180,16 @@ export class PptxWriter {
     const notesIds = Object.keys(notesSlidesXml).map((k) => parseInt(k, 10));
     const chartPartPaths = this.chartFiles.map((c) => c.path);
 
+    const fonts = this.fonts ?? EmbeddedFonts.none();
+
     // 2. Top-level + ppt-level scaffolding.
-    add("[Content_Types].xml", this.buildContentTypes(slideCount, notesIds, chartPartPaths));
+    add("[Content_Types].xml", this.buildContentTypes(slideCount, notesIds, chartPartPaths, !fonts.isEmpty()));
     add("_rels/.rels", this.buildTopRels());
     add("docProps/core.xml", this.buildCoreProps(deck));
     add("docProps/app.xml", this.buildAppProps(slideCount));
 
-    add("ppt/presentation.xml", this.buildPresentation(slideCount));
-    add("ppt/_rels/presentation.xml.rels", this.buildPresentationRels(slideCount));
+    add("ppt/presentation.xml", this.buildPresentation(slideCount, fonts));
+    add("ppt/_rels/presentation.xml.rels", this.buildPresentationRels(slideCount, fonts));
 
     add("ppt/theme/theme1.xml", this.buildTheme(deck));
     add("ppt/slideMasters/slideMaster1.xml", this.buildSlideMaster());
@@ -214,12 +226,17 @@ export class PptxWriter {
       add(media.path, media.bytes);
     }
 
+    // 8. Embedded fonts (only when the host supplied them).
+    for (const font of fonts.parts) {
+      add(font.part, font.bytes);
+    }
+
     return zipSync(files);
   }
 
   // ─── Top-level parts ───────────────────────────────────────────────────
 
-  private buildContentTypes(slideCount: number, notesSlideIds: number[], chartParts: string[]): string {
+  private buildContentTypes(slideCount: number, notesSlideIds: number[], chartParts: string[], hasFonts = false): string {
     let slideOverrides = "";
     for (let i = 1; i <= slideCount; i++) {
       slideOverrides +=
@@ -258,7 +275,9 @@ export class PptxWriter {
       '<Default Extension="jpeg" ContentType="image/jpeg"/>' +
       '<Default Extension="gif" ContentType="image/gif"/>' +
       '<Default Extension="svg" ContentType="image/svg+xml"/>' +
-      '<Default Extension="webp" ContentType="image/webp"/>';
+      '<Default Extension="webp" ContentType="image/webp"/>' +
+      // Only when a font is embedded, so every other deck keeps its bytes.
+      (hasFonts ? '<Default Extension="fntdata" ContentType="application/x-fontdata"/>' : "");
 
     return (
       Xml.declaration() +
@@ -321,7 +340,7 @@ export class PptxWriter {
 
   // ─── presentation.xml ──────────────────────────────────────────────────
 
-  private buildPresentation(slideCount: number): string {
+  private buildPresentation(slideCount: number, fonts: EmbeddedFonts = EmbeddedFonts.none()): string {
     let sldIdLst = "";
     for (let i = 1; i <= slideCount; i++) {
       const id = 256 + (i - 1);
@@ -329,21 +348,74 @@ export class PptxWriter {
     }
     const slideMasterRid = "rId" + (slideCount + 2);
 
+    // With embedded fonts the file says so, and drops `saveSubsetFonts`: that
+    // flag declares the embedded fonts to be character subsets, and these are
+    // whole fonts. LibreOffice's own export writes the same pair.
+    const fontFlag = fonts.isEmpty() ? 'saveSubsetFonts="1"' : 'embedTrueTypeFonts="1"';
+
     return (
       Xml.declaration() +
       '<p:presentation xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" ' +
       'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" ' +
       'xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" ' +
-      'saveSubsetFonts="1">' +
+      fontFlag +
+      ">" +
       '<p:sldMasterIdLst><p:sldMasterId id="2147483648" r:id="' + slideMasterRid + '"/></p:sldMasterIdLst>' +
       '<p:sldIdLst>' + sldIdLst + '</p:sldIdLst>' +
-      '<p:sldSz cx="' + Emu.DEFAULT_SLIDE_WIDTH + '" cy="' + Emu.DEFAULT_SLIDE_HEIGHT + '" type="screen16x9"/>' +
+      this.slideSizeXml() +
       '<p:notesSz cx="' + Emu.DEFAULT_SLIDE_HEIGHT + '" cy="' + Emu.DEFAULT_SLIDE_WIDTH + '"/>' +
+      this.buildEmbeddedFontList(slideCount, fonts) +
       "</p:presentation>"
     );
   }
 
-  private buildPresentationRels(slideCount: number): string {
+  /**
+   * `<p:sldSz>` for a 10in-wide slide shaped by `theme.aspectRatio`.
+   *
+   * The ratio used to be accepted by the validator and published in the schema
+   * while every deck was written 16:9, so a 4:3 deck came out stretched. A named
+   * size (16:9, 16:10, 4:3) keeps its `type`; anything else is custom, which PPTX
+   * expresses by leaving `type` off.
+   */
+  private slideSizeXml(): string {
+    const type = DesignUnits.slideSizeType(this.slideHeightEmu);
+    return (
+      '<p:sldSz cx="' +
+      Emu.DEFAULT_SLIDE_WIDTH +
+      '" cy="' +
+      this.slideHeightEmu +
+      '"' +
+      (type !== null ? ' type="' + type + '"' : "") +
+      "/>"
+    );
+  }
+
+  /**
+   * `<p:embeddedFontLst>`: one entry per typeface, its variants in the schema's
+   * fixed order (regular, bold, italic, boldItalic). It follows `<p:notesSz>`
+   * because `CT_Presentation` is a sequence, and LibreOffice's export places it
+   * there. Relationship ids continue after the slide master's, in the same order
+   * `buildPresentationRels()` emits them.
+   */
+  private buildEmbeddedFontList(slideCount: number, fonts: EmbeddedFonts): string {
+    if (fonts.isEmpty()) return "";
+
+    let rid = slideCount + 3;
+    let entries = "";
+    for (const [typeface, variants] of fonts.byTypeface()) {
+      entries += '<p:embeddedFont><p:font typeface="' + Xml.attr(typeface) + '"/>';
+      for (const variant of FONT_VARIANT_ORDER) {
+        if (variants.has(variant)) {
+          entries += "<p:" + variant + ' r:id="rId' + rid++ + '"/>';
+        }
+      }
+      entries += "</p:embeddedFont>";
+    }
+
+    return "<p:embeddedFontLst>" + entries + "</p:embeddedFontLst>";
+  }
+
+  private buildPresentationRels(slideCount: number, fonts: EmbeddedFonts = EmbeddedFonts.none()): string {
     let rels =
       '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" Target="theme/theme1.xml"/>';
     for (let i = 1; i <= slideCount; i++) {
@@ -358,6 +430,22 @@ export class PptxWriter {
       '<Relationship Id="rId' +
       (slideCount + 2) +
       '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster" Target="slideMasters/slideMaster1.xml"/>';
+
+    // Font relationships in the same typeface-then-variant order as the list.
+    let rid = slideCount + 3;
+    for (const variants of fonts.byTypeface().values()) {
+      for (const variant of FONT_VARIANT_ORDER) {
+        const part = variants.get(variant);
+        if (part !== undefined) {
+          rels +=
+            '<Relationship Id="rId' +
+            rid++ +
+            '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/font" Target="' +
+            part.slice("ppt/".length) +
+            '"/>';
+        }
+      }
+    }
 
     return (
       Xml.declaration() +
@@ -1257,7 +1345,7 @@ export class PptxWriter {
     const id = element.id ?? `text-${shapeId}`;
 
     const widthEmu = Emu.fromFracX(toFloat(element.w ?? 0.8));
-    const heightEmu = Emu.fromFracY(toFloat(element.h ?? 0.2));
+    const heightEmu = Emu.fromFracY(toFloat(element.h ?? 0.2), this.slideHeightEmu);
 
     return (
       "<p:sp>" +
@@ -1268,7 +1356,7 @@ export class PptxWriter {
       "</p:nvSpPr>" +
       "<p:spPr>" +
       xfrm +
-      BoxDecoration.spPr(style, widthEmu, heightEmu) +
+      BoxDecoration.spPr(style, widthEmu, heightEmu, this.deckTheme) +
       "</p:spPr>" +
       body +
       "</p:sp>"
@@ -1293,9 +1381,9 @@ export class PptxWriter {
     const fit = typeof element.fit === "string" ? element.fit.toLowerCase() : "fill";
 
     const boxX = Emu.fromFracX(toFloat(element.x ?? 0));
-    const boxY = Emu.fromFracY(toFloat(element.y ?? 0));
+    const boxY = Emu.fromFracY(toFloat(element.y ?? 0), this.slideHeightEmu);
     const boxW = Math.max(1, Emu.fromFracX(toFloat(element.w ?? 0)));
-    const boxH = Math.max(1, Emu.fromFracY(toFloat(element.h ?? 0)));
+    const boxH = Math.max(1, Emu.fromFracY(toFloat(element.h ?? 0), this.slideHeightEmu));
 
     const intrinsic = getImageSize(embed.bytes);
     const imgW = intrinsic ? intrinsic[0] : 0;
@@ -1428,8 +1516,9 @@ export class PptxWriter {
 
     const [fillHex, fillAlpha] = Color.parse(element.fill ?? "rgba(139,92,246,0.15)", "8B5CF6");
     const [strokeHex, strokeAlpha] = Color.parse(element.stroke ?? "#8B5CF6", "8B5CF6");
+    // Design pixels, as fancy-slides draws it: the default 2px is 0.75pt.
     const strokeWidth = toFloat(element.strokeWidth ?? 2);
-    const strokeWidthEmu = Emu.fromPt(strokeWidth);
+    const strokeWidthEmu = Emu.fromPt(DesignUnits.toPt(strokeWidth, this.deckTheme));
     const dashStr = element.dashed ? '<a:prstDash val="dash"/>' : "";
 
     const fillXml =
@@ -1459,6 +1548,18 @@ export class PptxWriter {
             String(element.format ?? "plain"),
           );
 
+    // A rounded rectangle takes its `radius` (design pixels, fancy-slides'
+    // default 8) instead of PowerPoint's default corner, which it ignored.
+    const geometry =
+      prst === "roundRect"
+        ? roundRectGeometry(
+            toFloat(element.radius ?? 8),
+            Emu.fromFracX(toFloat(element.w ?? 0)),
+            Emu.fromFracY(toFloat(element.h ?? 0), this.slideHeightEmu),
+            this.deckTheme,
+          )
+        : '<a:prstGeom prst="' + prst + '"><a:avLst/></a:prstGeom>';
+
     return (
       "<p:sp>" +
       "<p:nvSpPr>" +
@@ -1468,7 +1569,7 @@ export class PptxWriter {
       "</p:nvSpPr>" +
       "<p:spPr>" +
       xfrm +
-      '<a:prstGeom prst="' + prst + '"><a:avLst/></a:prstGeom>' +
+      geometry +
       fillXml +
       lnXml +
       "</p:spPr>" +
@@ -1482,7 +1583,8 @@ export class PptxWriter {
     const code = String(element.code ?? "");
     const id = element.id ?? `code-${shapeId}`;
     const language = element.language !== undefined && element.language !== null ? String(element.language) : null;
-    const body = this.buildHighlightedCodeBody(code, language);
+    const style: Any = isPlainObject(element.style) ? element.style : {};
+    const body = this.buildHighlightedCodeBody(code, language, toFloat(style.fontSize ?? 32));
 
     return (
       "<p:sp>" +
@@ -1501,8 +1603,10 @@ export class PptxWriter {
     );
   }
 
-  private buildHighlightedCodeBody(code: string, language: string | null): string {
-    const sz = Emu.hundredthsOfPoint(12);
+  private buildHighlightedCodeBody(code: string, language: string | null, fontSizePx = 32.0): string {
+    // It was a fixed 12pt that no style could change. 32 design px is that same
+    // 12pt on the default canvas.
+    const sz = Emu.hundredthsOfPoint(DesignUnits.fontPt(fontSizePx, this.deckTheme));
     let paragraphs = "";
     const lines = code.split("\n");
     for (const line of lines) {
@@ -2069,8 +2173,10 @@ export class PptxWriter {
   // ─── Text body / paragraphs / runs ────────────────────────────────────
 
   private buildTextBody(content: string, style: Any, format: string): string {
-    const fontPt = toFloat(style.fontSize ?? 24);
-    const pt = Math.max(8.0, fontPt / 2);
+    // Design pixels scaled with the canvas (see DesignUnits), defaulting to
+    // fancy-slides' own 28. This was a halving with an 8pt floor, which made
+    // PowerPoint text a third larger than the fancy-slides preview.
+    const pt = DesignUnits.fontPt(toFloat(style.fontSize ?? 28), this.deckTheme);
     const sz = Emu.hundredthsOfPoint(pt);
     const baseBold = this.weightToBold(style.weight ?? null);
     const baseItalic = style.italic ? ' i="1"' : "";
@@ -2165,7 +2271,7 @@ export class PptxWriter {
 
     return (
       "<p:txBody>" +
-      '<a:bodyPr wrap="square" anchor="' + anchor.slice(3, -1) + '" rtlCol="0"' + BoxDecoration.bodyInsets(style) + "/>" +
+      '<a:bodyPr wrap="square" anchor="' + anchor.slice(3, -1) + '" rtlCol="0"' + BoxDecoration.bodyInsets(style, this.deckTheme) + "/>" +
       "<a:lstStyle/>" +
       paragraphs +
       "</p:txBody>"
@@ -2215,10 +2321,10 @@ export class PptxWriter {
       out += '<a:lnSpc><a:spcPct val="' + Math.round(toFloat(style.lineHeight) * 100000) + '"/></a:lnSpc>';
     }
     if (isNumeric(style?.spaceBefore)) {
-      out += '<a:spcBef><a:spcPts val="' + Emu.hundredthsOfPoint(toFloat(style.spaceBefore)) + '"/></a:spcBef>';
+      out += '<a:spcBef><a:spcPts val="' + Emu.hundredthsOfPoint(DesignUnits.toPt(toFloat(style.spaceBefore), this.deckTheme)) + '"/></a:spcBef>';
     }
     if (isNumeric(style?.spaceAfter)) {
-      out += '<a:spcAft><a:spcPts val="' + Emu.hundredthsOfPoint(toFloat(style.spaceAfter)) + '"/></a:spcAft>';
+      out += '<a:spcAft><a:spcPts val="' + Emu.hundredthsOfPoint(DesignUnits.toPt(toFloat(style.spaceAfter), this.deckTheme)) + '"/></a:spcAft>';
     }
     return out;
   }
@@ -2251,7 +2357,7 @@ export class PptxWriter {
   private runExtraAttrs(style: Any): string {
     let out = "";
     if (isNumeric(style?.letterSpacing)) {
-      out += ' spc="' + Emu.hundredthsOfPoint(toFloat(style.letterSpacing)) + '"';
+      out += ' spc="' + Emu.hundredthsOfPoint(DesignUnits.toPt(toFloat(style.letterSpacing), this.deckTheme)) + '"';
     }
     const caps = style?.caps ?? null;
     if (caps === "small") {
@@ -2289,9 +2395,9 @@ export class PptxWriter {
 
   private xfrmFromFractions(element: Any): string {
     const x = Emu.fromFracX(toFloat(element.x ?? 0));
-    const y = Emu.fromFracY(toFloat(element.y ?? 0));
+    const y = Emu.fromFracY(toFloat(element.y ?? 0), this.slideHeightEmu);
     const cx = Emu.fromFracX(toFloat(element.w ?? 0));
-    const cy = Emu.fromFracY(toFloat(element.h ?? 0));
+    const cy = Emu.fromFracY(toFloat(element.h ?? 0), this.slideHeightEmu);
     const rot = element.rotation !== undefined ? Math.round(toFloat(element.rotation) * 60000) : 0;
     const rotAttr = rot !== 0 ? ' rot="' + rot + '"' : "";
 

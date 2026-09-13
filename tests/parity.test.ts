@@ -4,6 +4,7 @@ import { mkdtempSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Agent, unzipSync } from "../src";
+import { generatedFont } from "./support/generated-font";
 
 // Cross-engine parity: the PHP dark-slide and this TS port should emit
 // byte-identical OOXML parts for the same deck. docProps/core.xml embeds a
@@ -358,6 +359,135 @@ const SCHEMAS: Record<string, unknown> = {
   },
 };
 
+/**
+ * The 0.8 design canvas and slide shape, compared against the PHP reference.
+ *
+ * - `aspect43`: `theme.aspectRatio` shapes `<p:sldSz>` and every Y conversion.
+ * - `canvas1440`: the documented way back to 0.7 sizes (720 / 1440 = 0.5).
+ * - `canvasDefaultLengths`: every authored length on the default 1920 canvas,
+ *   including the ones that land on rounding ties (1px = 0.375pt = 4762.5 EMU),
+ *   which is where two engines' `round` could disagree.
+ * - `roundedShapes`: a `rounded-rect` shape with and without `radius`, and a
+ *   decorated text box with one, all through the shared `roundRectGeometry`.
+ */
+SCHEMAS.aspect43 = {
+  id: "deck-aspect-43",
+  title: "Four by three",
+  metadata: META,
+  theme: { name: "default", aspectRatio: 4 / 3 },
+  slides: [
+    {
+      id: "s1",
+      layout: "blank",
+      elements: [
+        { id: "t", type: "text", x: 0.1, y: 0.5, w: 0.5, h: 0.25, content: "Middle of a 4:3 slide", style: { fontSize: 48 } },
+        { id: "r", type: "shape", shape: "rect", x: 0.6, y: 0.1, w: 0.3, h: 0.8, fill: "#E8F2F3" },
+      ],
+    },
+  ],
+};
+
+SCHEMAS.canvas1440 = {
+  id: "deck-canvas-1440",
+  title: "The 0.7 sizes",
+  metadata: META,
+  theme: { name: "default", slideWidth: 1440 },
+  slides: [
+    {
+      id: "s1",
+      layout: "blank",
+      elements: [
+        {
+          id: "t",
+          type: "text",
+          x: 0.1,
+          y: 0.1,
+          w: 0.8,
+          h: 0.3,
+          content: "Fifty-six",
+          style: { fontSize: 56, letterSpacing: 4, padding: 24, spaceBefore: 12, border: { width: 2 }, radius: 16 },
+        },
+        { id: "s", type: "shape", shape: "rect", x: 0.1, y: 0.5, w: 0.3, h: 0.2, strokeWidth: 4 },
+      ],
+    },
+  ],
+};
+
+SCHEMAS.canvasDefaultLengths = {
+  id: "deck-canvas-1920",
+  title: "Default canvas lengths",
+  metadata: META,
+  theme: { name: "default" },
+  slides: [
+    {
+      id: "s1",
+      layout: "blank",
+      elements: [
+        {
+          id: "t",
+          type: "text",
+          x: 0.06,
+          y: 0.1,
+          w: 0.5,
+          h: 0.3,
+          content: "Callout\nSecond paragraph",
+          style: {
+            fontSize: 26,
+            letterSpacing: 0.6,
+            spaceBefore: 5,
+            spaceAfter: 3,
+            padding: { left: 9, top: 2.5 },
+            fill: "#E8F2F3",
+            border: { width: 1, color: "#CBD5E1" },
+            accentBar: { color: "#0E7C86", width: 5 },
+          },
+        },
+        { id: "s", type: "shape", shape: "ellipse", x: 0.6, y: 0.1, w: 0.3, h: 0.3, strokeWidth: 1 },
+        {
+          id: "tb",
+          type: "table",
+          x: 0.06,
+          y: 0.5,
+          w: 0.88,
+          h: 0.3,
+          columns: [
+            { key: "a", label: "A" },
+            { key: "b", label: "B" },
+          ],
+          rows: [{ cells: { a: "1", b: "2" }, height: 50 }],
+          style: {
+            fontSize: 22,
+            rowHeight: 26,
+            padding: { left: 9, right: 9, top: 2, bottom: 2 },
+            header: { letterSpacing: 0.4, height: 28 },
+            borders: { outer: { width: 0.75 }, inner: { width: 0.5 } },
+          },
+        },
+        { id: "k", type: "code", x: 0.6, y: 0.5, w: 0.3, h: 0.3, language: "js", code: "const x = 1;", style: { fontSize: 20 } },
+      ],
+    },
+  ],
+};
+
+SCHEMAS.roundedShapes = {
+  id: "deck-rounded",
+  title: "Rounded corners",
+  metadata: META,
+  theme: { name: "default" },
+  slides: [
+    {
+      id: "s1",
+      layout: "blank",
+      elements: [
+        { id: "r1", type: "shape", shape: "rounded-rect", x: 0.1, y: 0.1, w: 0.3, h: 0.2, fill: "#1B3A5C" },
+        { id: "r2", type: "shape", shape: "rounded-rect", x: 0.5, y: 0.1, w: 0.3, h: 0.2, radius: 64, fill: "#1B3A5C" },
+        { id: "r3", type: "shape", shape: "rounded-rect", x: 0.1, y: 0.5, w: 0.3, h: 0.2, radius: 4000, content: "Pill" },
+        { id: "t", type: "text", x: 0.5, y: 0.5, w: 0.4, h: 0.3, content: "Box", style: { fill: "#E8F2F3", radius: 13 } },
+      ],
+    },
+  ],
+};
+
 const CORE = "docProps/core.xml";
 
 function maskCore(xml: string): string {
@@ -367,6 +497,31 @@ function maskCore(xml: string): string {
 }
 
 const HAS_PHP = phpAvailable();
+
+/**
+ * Compare two unzipped packages part by part. XML parts compare as text so a
+ * failure prints the difference; every other part (media, embedded fonts)
+ * compares as BYTES, because decoding a binary through UTF-8 replaces invalid
+ * sequences and could make two different files read the same.
+ */
+function expectSameParts(phpParts: Record<string, Uint8Array>, tsParts: Record<string, Uint8Array>): void {
+  expect(Object.keys(tsParts).sort()).toEqual(Object.keys(phpParts).sort());
+
+  const dec = new TextDecoder();
+  for (const part of Object.keys(phpParts)) {
+    if (!/\.(xml|rels)$/.test(part)) {
+      expect(Buffer.from(tsParts[part]!).equals(Buffer.from(phpParts[part]!)), `binary part ${part} differs`).toBe(true);
+      continue;
+    }
+    let phpText = dec.decode(phpParts[part]!);
+    let tsText = dec.decode(tsParts[part]!);
+    if (part === CORE) {
+      phpText = maskCore(phpText);
+      tsText = maskCore(tsText);
+    }
+    expect(tsText, `part ${part} differs`).toBe(phpText);
+  }
+}
 
 describe.skipIf(!HAS_PHP)("cross-engine parity (PHP vs TS)", () => {
   let dir: string;
@@ -392,23 +547,75 @@ describe.skipIf(!HAS_PHP)("cross-engine parity (PHP vs TS)", () => {
       writeFileSync(schemaFile, JSON.stringify(schema));
       php([PHP_SCRIPT, schemaFile, phpOut]);
 
-      const phpParts = unzipSync(new Uint8Array(readFileSync(phpOut)));
-      const tsParts = unzipSync(Agent.toBytes(schema));
-
-      expect(Object.keys(tsParts).sort()).toEqual(Object.keys(phpParts).sort());
-
-      const dec = new TextDecoder();
-      for (const part of Object.keys(phpParts)) {
-        let phpText = dec.decode(phpParts[part]!);
-        let tsText = dec.decode(tsParts[part]!);
-        if (part === CORE) {
-          phpText = maskCore(phpText);
-          tsText = maskCore(tsText);
-        }
-        expect(tsText, `part ${part} differs`).toBe(phpText);
-      }
+      expectSameParts(unzipSync(new Uint8Array(readFileSync(phpOut))), unzipSync(Agent.toBytes(schema)));
     });
   }
+
+  /**
+   * Embedded fonts: two typefaces, regular + bold each, generated in-test (no
+   * third-party font file). PHP reads them from disk through the bridge's
+   * options file; TS is handed the same bytes. The `.fntdata` parts — the EOT
+   * header and the font behind it — must come out byte-identical.
+   */
+  it("emits byte-identical OOXML parts: embeddedFonts", () => {
+    const fonts = {
+      "Qvx Display": {
+        regular: generatedFont("Qvx Display"),
+        bold: generatedFont("Qvx Display", { style: "Bold", weight: 700, fsType: 0x0008 }),
+      },
+      "Qvx Text": {
+        regular: generatedFont("Qvx Text", { fsType: 0x0004 }),
+        bold: generatedFont("Qvx Text", { style: "Bold", weight: 700 }),
+      },
+    };
+
+    const phpFonts: Record<string, Record<string, string>> = {};
+    for (const [typeface, variants] of Object.entries(fonts)) {
+      phpFonts[typeface] = {};
+      for (const [variant, bytes] of Object.entries(variants)) {
+        const path = join(dir, `${typeface.replace(/ /g, "")}-${variant}.ttf`);
+        writeFileSync(path, bytes);
+        phpFonts[typeface]![variant] = path;
+      }
+    }
+
+    const deck = {
+      id: "deck-fonts",
+      title: "Embedded fonts",
+      metadata: META,
+      theme: { name: "default", fonts: { heading: "Qvx Display", body: "Qvx Text" } },
+      slides: [
+        {
+          id: "s1",
+          layout: "blank",
+          elements: [
+            { id: "h", type: "text", x: 0.1, y: 0.1, w: 0.8, h: 0.3, content: "Heading", style: { fontSize: 96, fontFamily: "Qvx Display" } },
+            { id: "b", type: "text", x: 0.1, y: 0.5, w: 0.8, h: 0.3, content: "**Body** copy", format: "markdown", style: { fontFamily: "Qvx Text" } },
+          ],
+        },
+        { id: "s2", layout: "blank", elements: [] },
+      ],
+    };
+
+    const schemaFile = join(dir, "embeddedFonts.json");
+    const optionsFile = join(dir, "embeddedFonts.options.json");
+    const phpOut = join(dir, "embeddedFonts.php.pptx");
+    writeFileSync(schemaFile, JSON.stringify(deck));
+    writeFileSync(optionsFile, JSON.stringify({ fonts: phpFonts }));
+    php([PHP_SCRIPT, schemaFile, phpOut, optionsFile]);
+
+    const phpParts = unzipSync(new Uint8Array(readFileSync(phpOut)));
+    const tsParts = unzipSync(Agent.toBytes(deck, { fonts }));
+
+    // The comparison has to be over fonts, or it proves nothing about them.
+    expect(Object.keys(phpParts).filter((p) => p.endsWith(".fntdata")).sort()).toEqual([
+      "ppt/fonts/font1.fntdata",
+      "ppt/fonts/font2.fntdata",
+      "ppt/fonts/font3.fntdata",
+      "ppt/fonts/font4.fntdata",
+    ]);
+    expectSameParts(phpParts, tsParts);
+  });
 });
 
 /**

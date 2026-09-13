@@ -7,7 +7,11 @@ declare(strict_types=1);
  * given JSON deck, so the TS port can be diffed against it. Uses a minimal
  * PSR-4 autoloader (the PHP core is zero-dependency) — no composer needed.
  *
- *   php php-tobytes.php <deck.json> <out.pptx>
+ *   php php-tobytes.php <deck.json> <out.pptx> [options.json]
+ *
+ * `options.json` is passed straight through as the PHP writer's options. Its
+ * `fonts` map names FILE PATHS (`typeface => variant => path`), which the PHP
+ * engine accepts; the TS side of a parity case reads the same files as bytes.
  */
 
 spl_autoload_register(function (string $class): void {
@@ -27,5 +31,6 @@ spl_autoload_register(function (string $class): void {
 
 $deckJson = file_get_contents($argv[1]);
 $deck = json_decode($deckJson, true);
-$bytes = \DarkSlide\Agent::toBytes($deck);
+$options = isset($argv[3]) ? json_decode(file_get_contents($argv[3]), true) : [];
+$bytes = \DarkSlide\Agent::toBytes($deck, is_array($options) ? $options : []);
 file_put_contents($argv[2], $bytes);

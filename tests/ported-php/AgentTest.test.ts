@@ -249,14 +249,16 @@ describe("agent (ported PHP AgentTest)", () => {
     const deck = dsFixture();
     deck.slides[0].elements[0].content = "# Big heading\n## Medium\n### Small\nbody copy";
     deck.slides[0].elements[0].format = "markdown";
-    deck.slides[0].elements[0].style = { fontSize: 40 };
+    // 64 design px is 24pt on the default 1920 canvas.
+    deck.slides[0].elements[0].style = { fontSize: 64 };
     const slide = parts(Agent.toBytes(deck))["ppt/slides/slide1.xml"]!;
     expect(slide).toContain("<a:t>Big heading</a:t>");
     expect(slide).toContain("<a:t>Medium</a:t>");
     expect(slide).toContain("<a:t>Small</a:t>");
     expect(slide).not.toContain("<a:t># Big heading</a:t>");
-    expect(slide).toMatch(/<a:rPr[^>]*sz="3600"[^>]*b="1"[^>]*>[\s\S]{0,200}?Big heading/);
-    expect(slide).toMatch(/<a:rPr[^>]*sz="2000"[^>]*>[\s\S]{0,200}?body copy/);
+    // Body font is 64px → 24pt → sz=2400; h1 uses 1.8× → 43.2pt → sz=4320.
+    expect(slide).toMatch(/<a:rPr[^>]*sz="4320"[^>]*b="1"[^>]*>[\s\S]{0,200}?Big heading/);
+    expect(slide).toMatch(/<a:rPr[^>]*sz="2400"[^>]*>[\s\S]{0,200}?body copy/);
   });
 
   it("highlights code blocks with colored token runs", () => {
