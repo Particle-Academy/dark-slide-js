@@ -1,6 +1,6 @@
 # @particle-academy/dark-slide
 
-[![Fancy UI suite](art/fancy-ui.svg)](https://particle.academy)
+[![Fancified](art/fancified.svg)](https://particle.academy)
 
 Zero-dependency, **isomorphic** (browser + Node) `.pptx` writer + reader for
 agentic deck creation. The Node/TypeScript mirror of the PHP
