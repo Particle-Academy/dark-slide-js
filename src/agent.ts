@@ -14,7 +14,7 @@ import { Validator } from "./schema/validator";
 import { PptxWriter } from "./writer/pptx-writer";
 
 /** This package's own version, pinned to package.json by `version.test.ts`. */
-export const VERSION = "0.8.2";
+export const VERSION = "0.8.3";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any;

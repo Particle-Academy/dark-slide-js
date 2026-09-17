@@ -11,13 +11,21 @@
  * into a whole-deck replace. Nothing here may put `Date.now()`, `Math.random()`
  * or the environment into a value it returns.
  *
- * **And reading its OWN clock is only half of that.** A value derived from a
- * part the WRITER stamps with the clock is just as impure, one step removed,
- * and it is worse: two reads of one buffer agree, so it looks fixed, while a
- * deck serialised and re-serialised — a consumer saving a file that changed
- * nothing — diverges every single time. That is what 0.8.1 shipped. Anything
- * derived from the package must therefore skip the parts that are about the
- * SAVE rather than about the deck; see `DIGEST_EXCLUDED_PART`.
+ * **The id is a function of the CONTENT, never of the package bytes.** That
+ * distinction took three attempts to state correctly, so it is worth being
+ * blunt about: a digest of the bytes identifies a SERIALISATION, and two
+ * serialisations of one deck are not byte-equal. 0.8.1 hashed the whole
+ * package, which followed the writer's clock. 0.8.2 excluded the clock-bearing
+ * part, which removed ONE source of byte variance and left the rest — a deck
+ * carrying a shape or a code block still re-serialises to different
+ * `ppt/slides/slideN.xml` bytes, so the id still moved while the structure sat
+ * perfectly still. `contentDigest()` hashes what this method RETURNS.
+ *
+ * The consequence to hold on to: **any two byte layouts that read to the same
+ * structure get the same id.** It does NOT follow that a file from another
+ * producer and a DarkSlide-authored file of "the same deck" agree — that holds
+ * only as far as `read()` normalises them to the same structure, which is not
+ * promised here and is not what this guarantees.
  */
 
 import { Emu } from "../helpers/emu";
@@ -25,24 +33,110 @@ import { parseXml, el, at, type XmlNode } from "./xml";
 import { crc32, unzipSync } from "../zip";
 
 const DECODER = new TextDecoder();
-const NAME_ENCODER = new TextEncoder();
+const ENCODER = new TextEncoder();
 
-/** A separator, so a part's name cannot run into its contents in the digest. */
-const DIGEST_SEPARATOR = new Uint8Array([0]);
+/** Reused across canonicalize() calls; `feed` consumes synchronously, so sharing is safe. */
+const NUMBER_BYTES = new Uint8Array(8);
+const NUMBER_VIEW = new DataView(NUMBER_BYTES.buffer);
 
 /**
- * The one part left out of the deck id, because it is the one part that is not
- * about the deck. `docProps/core.xml` carries `<dcterms:created>` and
- * `<dcterms:modified>`, which the writer stamps from the clock, so it is the
- * only entry that differs between two serialisations of one deck.
+ * Feed one value to the digest in a form all three engines agree on.
  *
- * Measured rather than assumed, and the measurement is why this is exactly one
- * name long: of a 43-entry package written either side of a second boundary,
- * ONE entry differed. Do not widen this to a metadata set on suspicion —
- * `docProps/app.xml` and the rest were measured stable, and a speculative
- * exclusion is a guess someone has to unpick later.
+ * This is a CANONICAL ENCODING and its rules are the contract, not an
+ * implementation detail — the PHP and Python engines implement the same one and
+ * the reader-parity suites compare the resulting id, so a divergence here is a
+ * divergence in the id. Spelled out:
+ *
+ *   null          `~`
+ *   true / false  `T` / `F`
+ *   number        `#` then the eight bytes of the IEEE-754 binary64, big endian
+ *   string        `s`, the UTF-8 BYTE length in decimal, `:`, then the bytes
+ *   empty [] / {} `e`
+ *   array         `[` then each item, then `]`
+ *   object        `{` then each key then its value, keys ascending, then `}`
+ *
+ * Three of those choices are load-bearing:
+ *
+ * **Numbers go in as raw IEEE bits, never as text.** The three languages
+ * disagree about the TYPE of a number — PHP's `int / int` is an int when it
+ * divides exactly, Python's `/` is always a float, JS has only doubles — and
+ * about how a float RENDERS: PHP's depends on the `serialize_precision` ini
+ * setting, which a consumer can change underneath us. Bit patterns have no such
+ * freedom. Two finite doubles that compare equal have identical bits, and both
+ * parity suites already assert the engines read numerically equal values, so
+ * agreement here follows from a property that is already tested. `-0` is the one
+ * exception to that and is normalised; non-finite values cannot occur in a deck
+ * and are mapped to a marker rather than trusted.
+ *
+ * **Strings are length-prefixed**, so there is no escaping convention for three
+ * languages to agree on.
+ *
+ * **An empty array and an empty object collapse to ONE marker.** PHP cannot tell
+ * them apart — `[]` is both — so a table row with no cells is `[]` there and
+ * `{}` here. Both parity suites already normalise the two together, which is the
+ * estate deciding that distinction is not meaningful; a digest depending on it
+ * would depend on something already ruled meaningless.
+ *
+ * Keys are sorted rather than taken in insertion order. JS's default sort is
+ * UTF-16 code-unit order, which matches PHP's byte order and Python's code-point
+ * order for everything below U+10000. Every key a read deck contains is
+ * machine-generated ASCII, which the purity suite checks rather than assumes.
  */
-const DIGEST_EXCLUDED_PART = "docProps/core.xml";
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function canonicalize(value: any, feed: (bytes: Uint8Array) => void): void {
+  if (value === null || value === undefined) {
+    feed(ENCODER.encode("~"));
+    return;
+  }
+  if (typeof value === "boolean") {
+    feed(ENCODER.encode(value ? "T" : "F"));
+    return;
+  }
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) {
+      feed(ENCODER.encode("?"));
+      return;
+    }
+    // `-0 === 0` is true, so this collapses negative zero, whose bits differ.
+    NUMBER_VIEW.setFloat64(0, value === 0 ? 0 : value, false);
+    feed(ENCODER.encode("#"));
+    feed(NUMBER_BYTES);
+    return;
+  }
+  if (typeof value === "string") {
+    const bytes = ENCODER.encode(value);
+    feed(ENCODER.encode("s" + bytes.length + ":"));
+    feed(bytes);
+    return;
+  }
+  if (Array.isArray(value)) {
+    if (value.length === 0) {
+      feed(ENCODER.encode("e"));
+      return;
+    }
+    feed(ENCODER.encode("["));
+    for (const item of value) canonicalize(item, feed);
+    feed(ENCODER.encode("]"));
+    return;
+  }
+  if (typeof value === "object") {
+    const keys = Object.keys(value as object).sort();
+    if (keys.length === 0) {
+      feed(ENCODER.encode("e"));
+      return;
+    }
+    feed(ENCODER.encode("{"));
+    for (const key of keys) {
+      canonicalize(key, feed);
+      canonicalize((value as Record<string, unknown>)[key], feed);
+    }
+    feed(ENCODER.encode("}"));
+    return;
+  }
+
+  // Unreachable for a deck, which is arrays, objects and scalars all the way down.
+  feed(ENCODER.encode("?"));
+}
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any;
@@ -126,24 +220,6 @@ export class PptxReader {
   private slideHeightEmu = Emu.DEFAULT_SLIDE_HEIGHT;
 
   /**
-   * CRC-32 over the package's entries as eight lowercase hex digits — the deck
-   * id this read returns. CRC-32 rather than a cryptographic digest because all
-   * three engines already carry one for the zip container itself, so the trio
-   * agrees on the id without any of them growing a hashing dependency — and
-   * here specifically, without reaching for `node:crypto` in a file that has to
-   * run in a browser.
-   *
-   * It was `Date.now()` until 0.8.1 and the whole package's bytes until 0.8.2.
-   * Both were impure; the second was worse. `Date.now()` moved only across a
-   * tick, so a re-read was wrong about one time in five. Hashing the whole file
-   * moved the clock read from HERE to the writer — `docProps/core.xml` is
-   * stamped at save time — and the two serialisations a round trip compares are
-   * always written apart, so it diverged 14 times out of 14 and broke pptx
-   * version history in a consumer's shipped product.
-   */
-  private packageDigest = "";
-
-  /**
    * The 1-based number of the slide being parsed, and how many fallback ids
    * have been minted for it. Together they replace a `Math.random()` fallback
    * for elements whose `<p:cNvPr>` carries no `name`. Numbering PER SLIDE is
@@ -181,28 +257,31 @@ export class PptxReader {
     this.slideFallbackIds = 0;
 
     this.parts = unzipSync(bytes);
-    this.packageDigest = this.digestOfParts();
-    return this.extract();
+    const deck = this.extract();
+    // Stamped HERE rather than inside extract() because extract() has early
+    // returns for a malformed package, and an id that some return paths skip is
+    // worse than one that is wrong.
+    deck.id = "imported-" + this.contentDigest(deck);
+    return deck;
   }
 
   /**
-   * CRC-32 over every entry of the package except `DIGEST_EXCLUDED_PART`.
+   * The deck id: CRC-32 over a canonical encoding of the DECK, as eight
+   * lowercase hex digits. Not of the package — see the note on this class.
    *
-   * Entry names go in alongside their contents, so moving a part cannot leave
-   * the id unchanged. The walk is in archive order — `unzipSync` returns the
-   * central directory's order, which is what PHP's `ZipArchive` and Python's
-   * `namelist()` enumerate too. That, plus CRC-32 being the one digest all
-   * three already have, is what makes two engines read one file to the same id.
+   * `id` is removed first, because it is the value being computed. Nothing else
+   * is removed: every other field is either read out of the file or derived
+   * deterministically from it (`imported-slide-N`, and an element's positional
+   * fallback id), so all of it is content.
    */
-  private digestOfParts(): string {
+  private contentDigest(deck: Record<string, unknown>): string {
+    const content: Record<string, unknown> = { ...deck };
+    delete content.id;
+
     let crc = 0;
-    for (const [name, data] of Object.entries(this.parts)) {
-      if (name === DIGEST_EXCLUDED_PART) continue;
-      crc = crc32(NAME_ENCODER.encode(name), crc);
-      crc = crc32(DIGEST_SEPARATOR, crc);
-      crc = crc32(data, crc);
-      crc = crc32(DIGEST_SEPARATOR, crc);
-    }
+    canonicalize(content, (chunk) => {
+      crc = crc32(chunk, crc);
+    });
 
     return crc.toString(16).padStart(8, "0");
   }
@@ -238,7 +317,10 @@ export class PptxReader {
 
   private extract(): Record<string, unknown> {
     const deck: Record<string, Any> = {
-      id: "imported-" + this.packageDigest,
+      // Filled in by fromBytes() once the deck is complete — the digest is over
+      // the content, so it cannot exist before the content does. Declared first
+      // so the returned key order is unchanged.
+      id: "",
       title: this.readCoreTitle() ?? "Imported",
       theme: { name: "imported" },
       slides: [],

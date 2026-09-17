@@ -1,4 +1,6 @@
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { Agent, PptxReader, unzipSync, zipSync } from "../src";
 
 /**
@@ -21,17 +23,25 @@ import { Agent, PptxReader, unzipSync, zipSync } from "../src";
  * test that reads twice and hopes to straddle a second boundary passes by luck.
  * Same bytes agree; different bytes disagree.
  *
- * **0.8.1's fix was half a fix, and every test in this file passed anyway.** It
- * derived the id from the whole package, and the package embeds a `gmdate()`
- * stamp in `docProps/core.xml` — so the clock read moved from the reader to the
- * WRITER. Two reads of one buffer still agreed, which is all these cases asked,
- * while a deck saved and re-read got a different id EVERY time instead of one
- * in five. That broke pptx version history in a consumer's shipped product.
+ * **It took three releases to state the property at the right level**, and the
+ * first two both passed a suite that looked thorough:
  *
- * The lesson is in the shape of the cases below, not in the fix: every one of
- * them read the same buffer twice. A defect one serialisation away was outside
- * what any of them could see. "keeps the deck id when a save changed nothing"
- * is the case that reaches it.
+ *   0.8.1  id = digest(whole package)          followed the WRITER's clock
+ *   0.8.2  id = digest(package minus core.xml) removed the clock, kept bytes
+ *   0.8.3  id = digest(the deck read() returns)
+ *
+ * The middle one is the instructive failure. Excluding the clock-bearing part
+ * removed one source of byte variance and left the others: a deck carrying a
+ * shape or a code block re-serialises to different `ppt/slides/slideN.xml`
+ * bytes, so the id still moved while the structure sat perfectly still. A digest
+ * of bytes identifies a SERIALISATION; two serialisations of one deck are not
+ * byte-equal, and no exclusion list was ever going to make them so.
+ *
+ * So the property is now: **any two byte layouts that read to the same structure
+ * get the same id.** Note what that does NOT say — that a file from another
+ * producer and one of ours "of the same deck" agree. That holds only as far as
+ * `read()` normalises them to the same structure, which is not promised.
+ * `foreign-libreoffice.pptx` shows both halves.
  */
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -99,6 +109,22 @@ function namelessBytes(): Uint8Array {
 
 const NAMELESS = namelessBytes();
 
+const FIXTURES = join(__dirname, "fixtures");
+
+/**
+ * A `.pptx` written by a genuinely independent producer.
+ *
+ * Regenerate with LibreOffice — reproducible, and the reason a binary is
+ * committed rather than a generator nobody can run:
+ *
+ *   soffice --headless --convert-to pptx --outdir <dir> <ours.pptx>
+ *
+ * where `<ours.pptx>` is `Agent.toBytes(foreign-libreoffice-source.json)`. It is
+ * LibreOffice, not PowerPoint; what matters is that the serialisation is not
+ * ours, and its `<p:cNvPr>` / part layout / ordering are all its own.
+ */
+const FOREIGN = new Uint8Array(readFileSync(join(FIXTURES, "foreign-libreoffice.pptx")));
+
 /** Resolve once the wall-clock second has advanced, so two writes cannot share a timestamp. */
 async function nextSecond(): Promise<void> {
   const second = Math.floor(Date.now() / 1000);
@@ -162,21 +188,111 @@ describe("read() is a pure function of its bytes", () => {
     expect((Agent.read(BYTES) as Any).id).not.toBe((Agent.read(other) as Any).id);
   });
 
-  it("gives a renamed deck the SAME id, because the title lives in the excluded part", () => {
-    // A consequence of excluding `docProps/core.xml` whole, recorded here so it
-    // is a decision rather than something the next person discovers.
-    // `<dc:title>` shares that part with the save timestamp, so a rename does
-    // not move the id — the returned `title` still changes, so a differ still
-    // sees the rename, and treating a renamed deck as the same deck is
-    // defensible on its own terms. Narrowing the exclusion to the two
-    // `<dcterms:*>` elements would change this, at the cost of regexing XML
-    // inside the digest path in three engines; measured as unnecessary and
-    // deliberately not done.
-    const renamed = Agent.read(Agent.toBytes({ ...DECK, title: "Renamed, same deck" })) as Any;
+  it("gives a renamed deck a different id, because a title is content", () => {
+    // 0.8.2 did the opposite, as a side effect of excluding `docProps/core.xml`
+    // whole — `<dc:title>` lives in that part. Digesting the deck rather than the
+    // package puts the title back where it belongs: `read()` returns it, so it
+    // counts.
+    const renamed = Agent.read(Agent.toBytes({ ...DECK, title: "Renamed, and that is a change" })) as Any;
     const original = Agent.read(BYTES) as Any;
 
     expect(renamed.title).not.toBe(original.title);
-    expect(renamed.id).toBe(original.id);
+    expect(renamed.id).not.toBe(original.id);
+  });
+
+  it("gives two byte layouts of one structure the SAME id", () => {
+    // THE property. Everything else in this file is a corollary of it.
+    //
+    // A shape element is the cheap way to induce it: our own writer does not
+    // re-serialise a read-back shape to the same `ppt/slides/slide1.xml` bytes,
+    // so these two packages genuinely differ on disk while reading to one deck.
+    // The byte-difference is asserted first, because a test where the two
+    // buffers happened to be identical would pass while proving nothing.
+    const deck = {
+      id: "two-layouts",
+      title: "Two Layouts",
+      theme: { name: "default" },
+      slides: [
+        {
+          id: "s1",
+          layout: "blank",
+          elements: [
+            { id: "r1", type: "shape", shape: "rect", x: 0.1, y: 0.1, w: 0.3, h: 0.3, fill: "#FF0000" },
+          ],
+        },
+      ],
+    };
+
+    const layoutA = Agent.toBytes(deck);
+    const readA = Agent.read(layoutA) as Any;
+    const layoutB = Agent.toBytes(readA);
+    const readB = Agent.read(layoutB) as Any;
+
+    const withoutId = (d: Any): Any => {
+      const copy = { ...d };
+      delete copy.id;
+      return copy;
+    };
+
+    expect(layoutB).not.toEqual(layoutA);
+    expect(withoutId(readB)).toEqual(withoutId(readA));
+    expect(readB.id).toBe(readA.id);
+  });
+
+  it("reads a foreign producer and our re-serialisation of it to one id", () => {
+    // The consumer's production shape: version 1 of a deck is the file a user
+    // uploaded, every version after it is ours. So the first edit of every
+    // upload diffs a FOREIGN serialisation against one of ours.
+    //
+    // Neither this repo nor its two siblings had a single `.pptx` fixture before
+    // this one — every fixture was generated by our own writer at test time,
+    // which is the same blind spot that left the reader's RNG path unexercised
+    // for several minor versions. See the note on the fixture below.
+    const first = Agent.read(FOREIGN) as Any;
+    const ours = Agent.toBytes(first);
+    const second = Agent.read(ours) as Any;
+
+    expect(first.slides.length).toBeGreaterThan(0);
+    expect(ours).not.toEqual(FOREIGN);
+    expect(second.id).toBe(first.id);
+  });
+
+  it("does NOT claim a foreign file and ours of one source deck share an id", () => {
+    // The limit of the property, asserted so nobody widens the claim by
+    // accident. `read()` recovers what it can model; LibreOffice's rendering of
+    // this deck and ours do not reduce to the same structure, so the two ids
+    // differ — correctly. The guarantee is about byte layouts of one STRUCTURE,
+    // not about two producers' idea of one deck.
+    const source = JSON.parse(readFileSync(join(FIXTURES, "foreign-libreoffice-source.json"), "utf8"));
+
+    expect((Agent.read(FOREIGN) as Any).id).not.toBe((Agent.read(Agent.toBytes(source)) as Any).id);
+  });
+
+  it("uses only ASCII keys, which is what lets three engines sort them alike", () => {
+    // The canonical encoding sorts map keys, and the three engines' sorts agree
+    // only below U+10000 (JS sorts UTF-16 code units, PHP bytes, Python code
+    // points). Every key a read deck contains is machine-generated, so this is
+    // true by construction — checked rather than assumed, because the digest
+    // silently depends on it.
+    const keys = new Set<string>();
+    const walk = (value: Any): void => {
+      if (Array.isArray(value)) {
+        for (const item of value) walk(item);
+        return;
+      }
+      if (value !== null && typeof value === "object") {
+        for (const [key, item] of Object.entries(value)) {
+          keys.add(key);
+          walk(item);
+        }
+      }
+    };
+    walk(Agent.read(BYTES));
+    walk(Agent.read(FOREIGN));
+
+    expect(keys.size).toBeGreaterThan(0);
+    // eslint-disable-next-line no-control-regex
+    expect([...keys].filter((k) => /[^\x20-\x7E]/.test(k))).toEqual([]);
   });
 
   it("reuses one reader instance without carrying state between files", () => {
