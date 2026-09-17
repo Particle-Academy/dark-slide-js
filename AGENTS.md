@@ -39,6 +39,21 @@ follows that:
   with real mtimes; this writes STORE with a fixed 1980 date. The comparison
   unzips both and diffs parts, which is the real contract anyway — a reader sees
   parts, never the compression.
+- **`read()` is a PURE function of its bytes**, and that is a contract rather
+  than an observation. The same package read twice — in the same second or a
+  year apart, on any machine — returns an identical structure, down to every
+  generated id, because consumers store reads and DIFF them: one clock- or
+  RNG-derived field turns a diff of unchanged content into a whole-deck replace.
+  The deck id is CRC-32 of the package bytes; an element whose `<p:cNvPr>`
+  carries no `name` is numbered by its position in the file. Nothing on the read
+  side may put the clock, a random number or the environment into a returned
+  value. Guarded by `tests/reader-is-pure.test.ts`.
+
+  Both parity suites used to DELETE the deck id before comparing, so neither
+  could see this — a comparison that drops the field it cannot explain asserts
+  nothing about it, and all three engines had the same bug, which a suite that
+  only detects disagreement will never report.
+
 - **A missing PHP is a FAILURE in CI, not a skip.** `describe.skipIf` made a
   runner without PHP indistinguishable from one where every part matched, and CI
   installed Node only, so the suite had never once executed. The throw at the

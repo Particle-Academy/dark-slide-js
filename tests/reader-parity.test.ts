@@ -18,9 +18,10 @@ import { generatedFont } from "./support/generated-font";
 //   - treats empty [] and empty {} as equal,
 //   - sorts object keys,
 //   - compares numbers by value.
-// The deck `id` carries a random hex suffix on import (`imported-<rand>`), so it
-// is excluded from the comparison; everything substantive (element types,
-// geometry, text, table contents, background, notes, image data) is compared.
+// Nothing is excluded. The deck `id` used to be, because both readers minted it
+// from their own clock; it is CRC-32 of the package bytes in both engines since
+// dark-slide#9, so it is compared alongside everything substantive (element
+// types, geometry, text, table contents, background, notes, image data).
 //
 // Skips automatically when `php` isn't on PATH.
 
@@ -190,7 +191,12 @@ const isEmpty = (v: unknown): boolean =>
  *   - empty [] and empty {} collapse to the same sentinel,
  *   - object keys are sorted,
  *   - numbers compare by value (already the case once parsed),
- *   - the deck-level `id` (random `imported-<hex>`) is stripped.
+ *   - nothing is stripped. It used to drop the deck-level `id`, because both
+ *     readers minted it from their own clock and the two could not agree. That
+ *     made this suite silent about dark-slide#9 for as long as the bug existed:
+ *     a comparison that deletes the field it cannot explain asserts nothing
+ *     about it. The id is now CRC-32 of the package bytes in both engines, so
+ *     it is compared like everything else.
  */
 function normalize(value: Any): Any {
   if (isEmpty(value)) return "∅empty";
@@ -203,13 +209,6 @@ function normalize(value: Any): Any {
     return out;
   }
   return value;
-}
-
-/** Strip the random import id so the two engines' nondeterministic ids don't diverge. */
-function stripVolatileIds(deck: Any): Any {
-  const clone = JSON.parse(JSON.stringify(deck));
-  delete clone.id;
-  return clone;
 }
 
 /**
@@ -254,7 +253,7 @@ describe.skipIf(!HAS_PHP)("cross-engine reader parity (PHP vs TS)", () => {
       const phpDeck = JSON.parse(phpJson);
       const tsDeck = Agent.read(bytes);
 
-      expect(normalize(stripVolatileIds(tsDeck))).toEqual(normalize(stripVolatileIds(phpDeck)));
+      expect(normalize(tsDeck)).toEqual(normalize(phpDeck));
     });
   }
 
@@ -287,7 +286,7 @@ describe.skipIf(!HAS_PHP)("cross-engine reader parity (PHP vs TS)", () => {
 
     expect(tsDeck.theme.aspectRatio).toBe(2);
     expect(phpDeck.theme.aspectRatio).toBe(2);
-    expect(normalize(stripVolatileIds(tsDeck))).toEqual(normalize(stripVolatileIds(phpDeck)));
+    expect(normalize(tsDeck)).toEqual(normalize(phpDeck));
   });
 
   it("readers agree on deck content: aspect43 with embedded fonts", () => {
@@ -324,7 +323,7 @@ describe.skipIf(!HAS_PHP)("cross-engine reader parity (PHP vs TS)", () => {
     // Both have to be reading the new fields, or agreement proves nothing.
     expect(tsDeck.theme.aspectRatio).toBe(4 / 3);
     expect(tsDeck.metadata.embeddedFonts).toEqual([{ typeface: "Qvx Display", variants: ["regular", "italic"] }]);
-    expect(normalize(stripVolatileIds(tsDeck))).toEqual(normalize(stripVolatileIds(phpDeck)));
+    expect(normalize(tsDeck)).toEqual(normalize(phpDeck));
   });
 });
 

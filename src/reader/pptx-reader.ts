@@ -2,11 +2,19 @@
  * Best-effort PPTX → Deck reader. Faithful 1:1 port of PHP
  * `DarkSlide\Reader\PptxReader`. Uses the vendored zip + XML parser instead of
  * ZipArchive / SimpleXML.
+ *
+ * **read() is a pure function of its bytes.** The same package read twice — in
+ * the same second or a year apart, here or on another machine — comes back as
+ * an identical structure, down to every generated id. That is a contract
+ * rather than a property of the current code: consumers store reads and diff
+ * them, and one clock- or RNG-derived field turns a diff of unchanged content
+ * into a whole-deck replace. Nothing here may put `Date.now()`, `Math.random()`
+ * or the environment into a value it returns.
  */
 
 import { Emu } from "../helpers/emu";
 import { parseXml, el, at, type XmlNode } from "./xml";
-import { unzipSync } from "../zip";
+import { crc32, unzipSync } from "../zip";
 
 const DECODER = new TextDecoder();
 
@@ -91,12 +99,57 @@ export class PptxReader {
   private slideWidthEmu = Emu.DEFAULT_SLIDE_WIDTH;
   private slideHeightEmu = Emu.DEFAULT_SLIDE_HEIGHT;
 
+  /**
+   * CRC-32 of the package bytes as eight lowercase hex digits — the deck id
+   * this read returns. It was `Date.now()` until 0.8.1, which made the id a
+   * function of the clock as well as the file: the same deck read either side
+   * of a tick came back different, so a consumer diffing two reads of unchanged
+   * bytes saw the whole deck replaced. CRC-32 rather than a cryptographic
+   * digest because all three engines already carry one for the zip container
+   * itself, so the trio agrees on the id without any of them growing a hashing
+   * dependency — and here specifically, without reaching for `node:crypto` in a
+   * file that has to run in a browser.
+   */
+  private packageDigest = "";
+
+  /**
+   * The 1-based number of the slide being parsed, and how many fallback ids
+   * have been minted for it. Together they replace a `Math.random()` fallback
+   * for elements whose `<p:cNvPr>` carries no `name`. Numbering PER SLIDE is
+   * deliberate: inserting one shape into slide 1 then shifts only slide 1's ids
+   * instead of renumbering every element after it, which would turn a
+   * one-element edit into a whole-deck diff — the same failure the clock id
+   * caused, reached by an edit rather than by time.
+   */
+  private slideNumber = 0;
+  private slideFallbackIds = 0;
+
+  /**
+   * An id for an element whose `<p:cNvPr>` carries no `name` to borrow one
+   * from: its position in the file, as `imported-<slide>-<nth>`. Callers reach
+   * it through `??`, which does not evaluate it unless the name is genuinely
+   * absent, so the numbering stays tied to the file rather than to how many
+   * elements were parsed.
+   */
+  private nextFallbackId(prefix = "imported-"): string {
+    this.slideFallbackIds++;
+
+    return prefix + this.slideNumber + "-" + this.slideFallbackIds;
+  }
+
   /** Read a PPTX file's bytes into a Deck schema object. */
   read(bytes: Uint8Array): Record<string, unknown> {
     return this.fromBytes(bytes);
   }
 
   fromBytes(bytes: Uint8Array): Record<string, unknown> {
+    // Everything this read returns is derived from these bytes, here or below.
+    // The counters start over on every call because one reader instance may be
+    // handed a second file.
+    this.packageDigest = crc32(bytes).toString(16).padStart(8, "0");
+    this.slideNumber = 0;
+    this.slideFallbackIds = 0;
+
     this.parts = unzipSync(bytes);
     return this.extract();
   }
@@ -132,7 +185,7 @@ export class PptxReader {
 
   private extract(): Record<string, unknown> {
     const deck: Record<string, Any> = {
-      id: "imported-" + ((Math.floor(Date.now() / 1000) & 0xffffff).toString(16)),
+      id: "imported-" + this.packageDigest,
       title: this.readCoreTitle() ?? "Imported",
       theme: { name: "imported" },
       slides: [],
@@ -163,6 +216,8 @@ export class PptxReader {
         this.getPart("ppt/" + dirname(slideTarget) + "/_rels/" + basename(slideTarget) + ".rels") || "";
       const notes = this.readNotesFor(slideRels);
       this.currentSlideRels = this.parseSlideRels(slideRels, slideTarget);
+      this.slideNumber = i + 1;
+      this.slideFallbackIds = 0;
 
       const slide = this.parseSlide(slideXml, "imported-slide-" + (i + 1), notes);
       deck.slides.push(slide);
@@ -495,7 +550,7 @@ export class PptxReader {
 
     const cNvPr = descendant(sp, "cNvPr");
     const base: Record<string, Any> = {
-      id: cNvPr ? at(cNvPr, "name") ?? "imported-" + randInt(1000, 9999) : "imported-" + randInt(1000, 9999),
+      id: (cNvPr ? at(cNvPr, "name") : undefined) ?? this.nextFallbackId(),
       x: this.fracX(x),
       y: this.fracY(y),
       w: this.fracX(cx),
@@ -582,7 +637,7 @@ export class PptxReader {
     const cNvPr = descendant(pic, "cNvPr");
 
     return {
-      id: cNvPr ? at(cNvPr, "name") ?? "imported-" + randInt(1000, 9999) : "imported-" + randInt(1000, 9999),
+      id: (cNvPr ? at(cNvPr, "name") : undefined) ?? this.nextFallbackId(),
       type: "image",
       x: this.fracX(parseInt(at(offset, "x") ?? "0", 10) || 0),
       y: this.fracY(parseInt(at(offset, "y") ?? "0", 10) || 0),
@@ -658,7 +713,7 @@ export class PptxReader {
     const cNvPr = descendant(gf, "cNvPr");
 
     return {
-      id: cNvPr ? at(cNvPr, "name") ?? "imported-table-" + randInt(1000, 9999) : "imported-table-" + randInt(1000, 9999),
+      id: (cNvPr ? at(cNvPr, "name") : undefined) ?? this.nextFallbackId("imported-table-"),
       type: "table",
       x: this.fracX(parseInt(at(offset, "x") ?? "0", 10) || 0),
       y: this.fracY(parseInt(at(offset, "y") ?? "0", 10) || 0),
@@ -799,10 +854,6 @@ export class PptxReader {
 }
 
 // ─── Module helpers ──────────────────────────────────────────────────────
-
-function randInt(min: number, max: number): number {
-  return Math.floor(Math.random() * (max - min + 1)) + min;
-}
 
 /** PHP `round($x, 1)`. */
 function round1(x: number): number {
