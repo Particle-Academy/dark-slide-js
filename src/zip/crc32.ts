@@ -15,8 +15,15 @@ const TABLE = /* @__PURE__ */ (() => {
   return t;
 })();
 
-export function crc32(bytes: Uint8Array): number {
-  let crc = 0xffffffff;
+/**
+ * `previous` chains one call into the next: `crc32(b, crc32(a))` is
+ * `crc32(concat(a, b))`. The reader digests a package entry by entry that way
+ * rather than building one buffer of every part, which for a deck carrying
+ * embedded images would be a copy of the whole file. Default `0` is the
+ * unchained call the zip headers make, so their behaviour is untouched.
+ */
+export function crc32(bytes: Uint8Array, previous = 0): number {
+  let crc = (previous ^ 0xffffffff) >>> 0;
   for (let i = 0; i < bytes.length; i++) {
     crc = TABLE[(crc ^ bytes[i]!) & 0xff]! ^ (crc >>> 8);
   }

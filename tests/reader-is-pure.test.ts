@@ -1,6 +1,5 @@
 import { describe, it, expect } from "vitest";
 import { Agent, PptxReader, unzipSync, zipSync } from "../src";
-import { crc32 } from "../src/zip";
 
 /**
  * `read()` is a pure function of its bytes.
@@ -21,6 +20,18 @@ import { crc32 } from "../src/zip";
  * Both halves are asserted without waiting for a clock tick, deliberately: a
  * test that reads twice and hopes to straddle a second boundary passes by luck.
  * Same bytes agree; different bytes disagree.
+ *
+ * **0.8.1's fix was half a fix, and every test in this file passed anyway.** It
+ * derived the id from the whole package, and the package embeds a `gmdate()`
+ * stamp in `docProps/core.xml` — so the clock read moved from the reader to the
+ * WRITER. Two reads of one buffer still agreed, which is all these cases asked,
+ * while a deck saved and re-read got a different id EVERY time instead of one
+ * in five. That broke pptx version history in a consumer's shipped product.
+ *
+ * The lesson is in the shape of the cases below, not in the fix: every one of
+ * them read the same buffer twice. A defect one serialisation away was outside
+ * what any of them could see. "keeps the deck id when a save changed nothing"
+ * is the case that reaches it.
  */
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -88,6 +99,38 @@ function namelessBytes(): Uint8Array {
 
 const NAMELESS = namelessBytes();
 
+/** Resolve once the wall-clock second has advanced, so two writes cannot share a timestamp. */
+async function nextSecond(): Promise<void> {
+  const second = Math.floor(Date.now() / 1000);
+  while (Math.floor(Date.now() / 1000) === second) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+
+/** The same package with ONLY `docProps/core.xml` replaced — a second save of one deck. */
+function restamped(bytes: Uint8Array, modified: string): Uint8Array {
+  const decoder = new TextDecoder();
+  const encoder = new TextEncoder();
+  const parts = unzipSync(bytes);
+
+  return zipSync(
+    Object.entries(parts).map(([name, data]) => ({
+      name,
+      data:
+        name === "docProps/core.xml"
+          ? encoder.encode(
+              decoder
+                .decode(data)
+                .replace(
+                  /<dcterms:modified[^>]*>[^<]*<\/dcterms:modified>/,
+                  `<dcterms:modified xsi:type="dcterms:W3CDTF">${modified}</dcterms:modified>`,
+                ),
+            )
+          : data,
+    })),
+  );
+}
+
 function elementIds(deck: Any): string[] {
   return deck.slides.flatMap((slide: Any) => (slide.elements ?? []).map((element: Any) => element.id));
 }
@@ -112,9 +155,28 @@ describe("read() is a pure function of its bytes", () => {
     // The clock id's other half: `Date.now()` does not only move, it also
     // COLLIDES. Every deck imported in the same second shared one id, so a
     // store keyed on it overwrote one import with another.
-    const other = Agent.toBytes({ ...DECK, title: "A different deck entirely" });
+    const changed = JSON.parse(JSON.stringify(DECK)) as Any;
+    changed.slides[0].elements[0].content = "A different deck entirely";
+    const other = Agent.toBytes(changed);
 
     expect((Agent.read(BYTES) as Any).id).not.toBe((Agent.read(other) as Any).id);
+  });
+
+  it("gives a renamed deck the SAME id, because the title lives in the excluded part", () => {
+    // A consequence of excluding `docProps/core.xml` whole, recorded here so it
+    // is a decision rather than something the next person discovers.
+    // `<dc:title>` shares that part with the save timestamp, so a rename does
+    // not move the id — the returned `title` still changes, so a differ still
+    // sees the rename, and treating a renamed deck as the same deck is
+    // defensible on its own terms. Narrowing the exclusion to the two
+    // `<dcterms:*>` elements would change this, at the cost of regexing XML
+    // inside the digest path in three engines; measured as unnecessary and
+    // deliberately not done.
+    const renamed = Agent.read(Agent.toBytes({ ...DECK, title: "Renamed, same deck" })) as Any;
+    const original = Agent.read(BYTES) as Any;
+
+    expect(renamed.title).not.toBe(original.title);
+    expect(renamed.id).toBe(original.id);
   });
 
   it("reuses one reader instance without carrying state between files", () => {
@@ -126,7 +188,36 @@ describe("read() is a pure function of its bytes", () => {
     expect(reader.fromBytes(NAMELESS)).toEqual(fresh);
   });
 
-  it("derives the deck id from the bytes and nothing else", () => {
-    expect((Agent.read(BYTES) as Any).id).toBe("imported-" + crc32(BYTES).toString(16).padStart(8, "0"));
+  it("derives the deck id from the deck, not from when it was saved", () => {
+    // The deterministic form of the case below, and the one that says WHY:
+    // `docProps/core.xml` is the only entry a second save of one deck changes,
+    // so the id must not depend on it. Measured, not assumed — of this
+    // package's 43 entries, it is the only one that differs across a save.
+    const stamped = restamped(BYTES, "2019-01-01T00:00:00Z");
+
+    expect(stamped).not.toEqual(BYTES);
+    expect((Agent.read(stamped) as Any).id).toBe((Agent.read(BYTES) as Any).id);
+  });
+
+  it("keeps the deck id when a save changed nothing", async () => {
+    // The consumer-shaped case, and the one 0.8.1 would have failed: every
+    // other test here reads ONE buffer twice, so a defect that needs a second
+    // serialisation to appear is invisible to all of them.
+    //
+    // It starts from the SETTLED read form rather than from the authored deck,
+    // because the reader is lossy by design — a composite comes back as the
+    // table it became — so the first read-write-read genuinely changes the deck
+    // and is supposed to change the id with it. What must hold is that it then
+    // stops: from that point a save that changed nothing changes nothing.
+    const settled = Agent.read(Agent.toBytes(Agent.read(BYTES))) as Any;
+
+    // Forced, not hoped for. Two writes inside one second share a timestamp and
+    // would pass against the very code this case exists to fail.
+    await nextSecond();
+
+    const afterAnotherSave = Agent.read(Agent.toBytes(settled)) as Any;
+
+    expect(afterAnotherSave.id).toBe(settled.id);
+    expect(afterAnotherSave).toEqual(settled);
   });
 });
