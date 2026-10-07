@@ -253,10 +253,11 @@ function styleJsonSchema(): Record<string, unknown> {
  * writer hands it to the chart translator, which returns null for anything it
  * cannot read and leaves a titled placeholder. Full size, no data, no error.
  *
- * `categories` is deliberately absent: the engines do not agree on it (this one
- * honours it standalone, PHP and Python read it only alongside an `xAxis` without
- * `data`), and publishing a contract that is false somewhere is worse than
- * publishing the portable one, `xAxis.data`.
+ * `categories` is described as of 0.11.0. It was withheld while the engines
+ * disagreed -- PHP and Python ignored it, this one honoured it -- because a
+ * contract that is false somewhere should not be published. The owner ruled on
+ * 2026-10-07 that the other two should match this engine, so it is now true
+ * everywhere.
  */
 function chartOptionJsonSchema(): Record<string, unknown> {
   return {
@@ -302,6 +303,10 @@ function chartOptionJsonSchema(): Record<string, unknown> {
             description: "The category labels, in order, one per point in each series.",
           },
         },
+      },
+      categories: {
+        type: "array",
+        description: "A shorthand for the category labels, equivalent to `xAxis.data` and read only when that is absent. NOT an ECharts key -- ECharts itself ignores it, so a chart relying on it comes out labelled in a pptx export and numbered 1, 2, 3 ... in a browser renderer. `xAxis.data` is the form both ends read; prefer it.",
       },
       title: {
         type: ["object", "array"],

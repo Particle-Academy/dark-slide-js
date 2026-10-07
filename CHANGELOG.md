@@ -2,6 +2,34 @@
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-07
+
+### Changed
+
+- **The schema now describes `option.categories`.** It was withheld in 0.10.0
+  because the three engines disagreed -- this one honoured it, PHP and Python
+  ignored it -- and a contract that is false somewhere should not be published.
+  The owner ruled on 2026-10-07 that the other two should match this engine, so it
+  is now true everywhere. **No behaviour changed here**; this engine already
+  honoured it.
+
+### Added
+
+- **This engine now RUNS the shared `dark-slide/table-cell-model` conformance
+  suite** (`tests/conformance/table-cell-model.test.ts`), 33 rows green. The
+  suite's manifest has named three implementations since 0.7.0 and only Python
+  actually ran it -- a claim about three engines, checked on one, which reads as
+  coverage. Owner ruling, 2026-10-07.
+
+  Byte parity already compares every OOXML part of the nine-slide reference deck
+  against the PHP engine, but that deck walks ONE path through the resolution
+  chain per cell: a collapsed precedence layer emits identical bytes for it and is
+  wrong for every deck taking another order. The harness is sabotage-tested -- a
+  0.1pt change to the default padding turns 28 of 33 rows red.
+
+- `@particle-academy/fancy-conformance` ^0.34.0 as a dev dependency, like every
+  other engine in the trio.
+
 ## [0.10.0] - 2026-10-07
 
 ### Added

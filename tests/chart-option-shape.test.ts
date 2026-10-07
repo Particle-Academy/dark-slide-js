@@ -56,14 +56,7 @@ describe("the published chart option shape", () => {
 
     const described = option().properties;
     for (const key of read) {
-      // `categories` is deliberately NOT described: this engine honours it
-      // standalone while PHP and Python read it only alongside an `xAxis`
-      // without `data`. Publishing a key three engines disagree on would make
-      // the schema false somewhere.
-      if (key === "categories") {
-        expect(described).not.toHaveProperty("categories");
-        continue;
-      }
+
       expect(described, key).toHaveProperty(key);
       expect(described[key].description, key).not.toBe("");
     }
@@ -144,17 +137,14 @@ describe("the chart diagnostic", () => {
   });
 });
 
-describe("the three-way split on `categories`", () => {
-  it("pins that THIS engine honours a standalone `categories`, where PHP and Python do not", () => {
-    // Measured 2026-10-07. This engine seeds its candidates with `null`, so the
-    // `categories` fallback fires; PHP and Python seed `[]`, which is already an
-    // array, so theirs never does. A chart authored that way gets real labels
-    // here and 1, 2, 3 ... there, silently, and the reference deck carries no
-    // chart so byte parity has never seen it.
-    //
-    // Pinned rather than fixed: resolving it changes the rendered output of
-    // existing decks, which is the owner's call. When it is made, this fails in
-    // whichever engine moves, which is exactly what should happen.
+describe("`categories`, now that all three engines agree", () => {
+  it("honours a standalone `categories`, as it always did and the others now do", () => {
+    // Was a three-way split until 2026-10-07: this engine seeded its candidates
+    // `null` and honoured it, while PHP and Python seeded `[]` -- already an
+    // array, so their fallback never fired and the same deck came out with
+    // 1, 2, 3 ... labels. Invisible to byte parity, which never reaches the
+    // translator because the reference deck carries no chart. The owner ruled
+    // that the other two should match this engine.
     const spec = ChartTranslator.translate({
       categories: ["Q1", "Q2"],
       series: [{ type: "bar", data: [1, 2] }],
@@ -162,12 +152,14 @@ describe("the three-way split on `categories`", () => {
 
     expect(spec!.categories).toEqual(["Q1", "Q2"]);
 
-    // And the form that IS portable, published in the schema, works here too.
-    const portable = ChartTranslator.translate({
+    // `xAxis.data` still wins where both are given: it is the ECharts key, and
+    // the only one a browser renderer reads.
+    const both = ChartTranslator.translate({
+      categories: ["ignored", "also ignored"],
       xAxis: { data: ["Q1", "Q2"] },
       series: [{ type: "bar", data: [1, 2] }],
     });
 
-    expect(portable!.categories).toEqual(["Q1", "Q2"]);
+    expect(both!.categories).toEqual(["Q1", "Q2"]);
   });
 });
