@@ -1,5 +1,6 @@
 import { gettype, isNumeric, isPlainObject } from "../util";
 import { Schema } from "./schema";
+import { ChartTranslator } from "../helpers/chart-translator";
 import { ROW_KEYS, STYLE_KEYS, TableResolver } from "../table/table-resolver";
 import type { ValidationError } from "./types";
 
@@ -133,6 +134,9 @@ export class Validator {
             errors.push(err(`${path}/code`, "string", gettype(element.code ?? null), element.code ?? null, "Code element must have a `code` string."));
           }
           break;
+        case "chart":
+          errors.push(...validateChartOption(element, path));
+          break;
         case "table":
           errors.push(...validateTableRows(element, path));
           break;
@@ -199,6 +203,34 @@ function validateTableRows(element: Any, path: string): ValidationError[] {
   });
 
   return errors;
+}
+/**
+ * A chart element with no `option` object at all. Mirrors PHP
+ * `Validator::validateChartOption`.
+ *
+ * Deliberately NARROW. An option the translator cannot read is not an error: it
+ * falls back to a pre-rendered `image` / `src` data URI and then to a titled
+ * placeholder, which is supported and tested. `Agent.write()` throws on any error
+ * returned here, so flagging the untranslatable case would turn that documented
+ * fallback into a hard failure.
+ *
+ * The schema is where the rest belongs: it describes the translatable subset and
+ * says what an option outside it becomes.
+ */
+function validateChartOption(element: Any, path: string): ValidationError[] {
+  if (isPlainObject(element.option)) return [];
+
+  return [
+    err(
+      `${path}/option`,
+      "object (an ECharts option)",
+      gettype(element.option ?? null),
+      element.option ?? null,
+      "A chart element must have an `option` object. Give `series` a list of points with a supported type (" +
+        ChartTranslator.SUPPORTED_TYPES.join(", ") +
+        "), or supply a pre-rendered chart as a data: URI in `image`.",
+    ),
+  ];
 }
 function err(path: string, expected: string, got: string, value: unknown, hint: string): ValidationError {
   return { path, expected, got, value, hint };

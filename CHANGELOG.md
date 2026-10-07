@@ -2,6 +2,45 @@
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-07
+
+### Added
+
+- **The published schema now describes a chart `option`**, mirroring PHP
+  `Schema::chartOptionJsonSchema()` byte for byte. It exported
+  `{ type: "object" }` and nothing more, so a tool vocabulary generated from
+  `Agent.jsonSchema()` could not teach an author what a chart needs -- and the
+  failure is silent in both directions: ECharts draws an EMPTY CANVAS for an option
+  it does not recognise, and this writer leaves a titled PLACEHOLDER the same size
+  as the chart.
+
+  Described: `series` and its item shape (`type` with the four supported kinds,
+  `name`, `data` with all four accepted point forms, `smooth`, `areaStyle`),
+  `xAxis.data`, `title.text`, and what an untranslatable option BECOMES -- the
+  element's `image` / `src` data URI, then a placeholder. Asked for in the
+  fancy-slides#14 thread.
+
+- **`Agent.validate()` flags a chart element with no `option` object at all**, as
+  PHP's does. Deliberately narrow: an option the translator cannot read is not
+  flagged, because the placeholder is a supported fallback and `Agent.toBytes()`
+  throws on any validator error.
+
+### Fixed
+
+- **`ChartTranslator.translate()` now takes the same defensive stance as the
+  validator**, returning null for an option that is not an object rather than
+  relying on optional chaining to carry it. Pinned by a test, because the Python
+  port RAISED on the same input -- `[]`, which is how the PHP engine serialises an
+  empty option -- and took down a whole deck for one malformed element.
+
+### Changed
+
+- Recorded, not changed: **this engine honours `option.categories` with no `xAxis`
+  while PHP and Python ignore it.** `dark-slide-py/AGENTS.md` had the row as a
+  shared wart with Node marked `same`, which was never true. Measured 2026-10-07
+  and now pinned by a test here, because an unasserted divergence is one nobody can
+  see. Resolving it changes existing decks and is the owner's call.
+
 ## [0.9.0] - 2026-10-07
 
 ### Added
