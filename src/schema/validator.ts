@@ -1,5 +1,6 @@
 import { gettype, isNumeric, isPlainObject } from "../util";
 import { Schema } from "./schema";
+import { ROW_KEYS, STYLE_KEYS, TableResolver } from "../table/table-resolver";
 import type { ValidationError } from "./types";
 
 type Any = any;
@@ -132,6 +133,9 @@ export class Validator {
             errors.push(err(`${path}/code`, "string", gettype(element.code ?? null), element.code ?? null, "Code element must have a `code` string."));
           }
           break;
+        case "table":
+          errors.push(...validateTableRows(element, path));
+          break;
         case "kpiBand":
         case "metadataGrid":
           // An items-less composite is not an error the writer can see: it
@@ -148,6 +152,54 @@ export class Validator {
   }
 }
 
+/**
+ * A table row that shares no key with any column. Mirrors PHP
+ * `Validator::validateTableRows`.
+ *
+ * Every cell resolves to nothing and the table still draws at FULL SIZE, because
+ * its geometry comes from the columns and the row count. The result is a
+ * correctly-shaped grid with every cell blank and nothing raised anywhere -- the
+ * same class of wrong as the items-less composite above, and it reached a customer
+ * as a table whose rows were empty (fancy-slides#14).
+ *
+ * Three shapes are NOT this and must not be flagged: a POSITIONAL row (an array,
+ * read in column order), a partially-filled row (a missing cell is simply empty),
+ * and a row carrying only row-level style. Only an object row that matches NOTHING
+ * is unrecoverable -- in practice a mis-cased or renamed key, which is why the hint
+ * names the keys that would work.
+ */
+function validateTableRows(element: Any, path: string): ValidationError[] {
+  const rows = element.rows;
+  const rawColumns = element.columns;
+  if (!Array.isArray(rows) || !Array.isArray(rawColumns) || rawColumns.length === 0) return [];
+
+  const keys = TableResolver.normalizeColumns(rawColumns).map((c) => c.key);
+  const ignored = [...STYLE_KEYS, ...ROW_KEYS];
+  const errors: ValidationError[] = [];
+
+  rows.forEach((row: Any, i: number) => {
+    if (!isPlainObject(row)) return;
+    const inner: Any = isPlainObject(row.cells) || Array.isArray(row.cells) ? row.cells : row;
+    if (Array.isArray(inner)) return; // positional, read in column order
+
+    const claimed = Object.keys(inner).filter((k) => !ignored.includes(k));
+    if (claimed.length === 0 || claimed.some((k) => keys.includes(k))) return;
+
+    errors.push(
+      err(
+        `${path}/rows/${i}`,
+        "at least one key from: " + keys.join(" / "),
+        "keys: " + claimed.join(" / "),
+        row,
+        "No column reads anything from this row, so every cell would render empty at full table size. Key each cell by a column key (" +
+          keys.join(", ") +
+          "), or give the row as a positional list in column order.",
+      ),
+    );
+  });
+
+  return errors;
+}
 function err(path: string, expected: string, got: string, value: unknown, hint: string): ValidationError {
   return { path, expected, got, value, hint };
 }

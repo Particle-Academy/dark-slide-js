@@ -92,10 +92,13 @@ export interface ResolvedTable {
   hasHeader: boolean;
 }
 
-const STYLE_KEYS = [
+export const STYLE_KEYS = [
   "fill", "color", "bold", "italic", "underline", "align", "anchor",
   "fontSize", "letterSpacing", "caps", "fontFamily", "padding", "borders",
 ] as const;
+
+/** Row-level keys that are never cell values. Mirrors PHP `TableResolver::ROW_KEYS`. */
+export const ROW_KEYS = ["cells", "height"];
 
 const CELL_SPEC_KEYS = [
   "text", "colSpan", "rowSpan", "fill", "color", "bold", "italic", "underline",
@@ -269,6 +272,32 @@ interface Slot {
  * swallows. Spans are clamped to the grid: a `colSpan` of 99 on a two-column
  * table is a 2, never a row with 99 cells in it.
  */
+/**
+ * One row as cell values keyed by column key. Mirrors PHP `TableResolver::cellMap`.
+ *
+ * A row is canonically an object keyed by each column key. A row given as an
+ * ARRAY is POSITIONAL: its values are read in column order. That form used to be
+ * dropped from the deck entirely here -- `isPlainObject([...])` is false, so the
+ * loop skipped it -- while PHP kept it and emitted a row of empty cells. Three
+ * engines held to byte-identical OOXML disagreed on the ROW COUNT of the same
+ * deck, with nothing raised anywhere. Reported as fancy-slides#14.
+ *
+ * Surplus values have nowhere to go and are dropped; columns past the last value
+ * resolve to empty, exactly as a missing key does.
+ */
+function cellMapFor(row: Any, columns: ResolvedColumn[]): Any {
+  const inner: Any = isPlainObject(row) && (isPlainObject(row.cells) || Array.isArray(row.cells)) ? row.cells : row;
+
+  if (!Array.isArray(inner)) return inner;
+
+  const map: Any = {};
+  inner.forEach((value, i) => {
+    const col = columns[i];
+    if (col) map[col.key] = value;
+  });
+
+  return map;
+}
 function buildGrid(columns: ResolvedColumn[], rawRows: Any[], hasHeader: boolean): { source: Any; cells: Slot[] }[] {
   const n = columns.length;
   const grid: { source: Any; cells: Slot[] }[] = [];
@@ -281,8 +310,10 @@ function buildGrid(columns: ResolvedColumn[], rawRows: Any[], hasHeader: boolean
   }
 
   for (const row of rawRows) {
-    if (!isPlainObject(row)) continue;
-    const cellMap: Any = isPlainObject(row.cells) ? row.cells : row;
+    // A LIST row is positional, not invalid: `continue` here dropped it from the
+    // deck outright, while PHP kept it and emitted empty cells. See cellMap().
+    if (!isPlainObject(row) && !Array.isArray(row)) continue;
+    const cellMap = cellMapFor(row, columns);
     grid.push({
       source: row,
       cells: columns.map((col) => ({

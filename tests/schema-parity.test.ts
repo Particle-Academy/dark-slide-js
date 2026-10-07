@@ -122,7 +122,13 @@ describe.skipIf(!HAS_PHP)("schema parity (PHP vs TS)", () => {
     const reference = JSON.parse(php([PHP_SCRIPT]));
     const ours = Agent.jsonSchema();
 
-    for (const key of ["x", "y", "w", "h", "style", "strokeWidth", "radius"]) {
+    // EVERY element property, not a hand list. The list used to name seven keys,
+    // so `columns` and `rows` -- the two this suite would most have wanted to see
+    // -- sat outside it and went years undescribed in both engines with the check
+    // green. A hand list of fields to compare is a check that stops checking the
+    // moment a field is added.
+    expect(Object.keys(elementProps(ours)).sort()).toEqual(Object.keys(elementProps(reference)).sort());
+    for (const key of Object.keys(elementProps(reference))) {
       expect(elementProps(ours)[key], `element.${key} differs from the PHP reference`).toEqual(elementProps(reference)[key]);
     }
     for (const key of ["slideWidth", "aspectRatio"]) {
@@ -130,6 +136,7 @@ describe.skipIf(!HAS_PHP)("schema parity (PHP vs TS)", () => {
     }
     // The comparison has to be over something, or it passes on two empty exports.
     expect(Object.keys(elementProps(reference).style.properties ?? {})).toContain("fontSize");
+    expect(Object.keys(elementProps(reference).columns.items.properties ?? {})).toContain("key");
     expect(themeProps(reference).slideWidth.description).toContain("1920");
   });
 });

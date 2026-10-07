@@ -2,6 +2,41 @@
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-07
+
+### Added
+
+- **The published schema now carries the ITEM shape of a table's `columns` and
+  `rows`**, mirroring PHP `Schema::tableColumnsJsonSchema()` /
+  `tableRowsJsonSchema()` byte for byte. It exported `columns: {type: "array"},
+  rows: {type: "array"}` and nothing more, so a tool vocabulary generated from
+  `Agent.jsonSchema()` could not teach an author that a column's `key` is what every
+  row is keyed BY. Reported as fancy-slides#14.
+
+- **`Agent.validate()` flags a table row that matches no column**, as PHP's does. A
+  positional row, a partially-filled row and a row carrying only style are not
+  flagged; the hint names the keys that would have worked.
+
+### Changed
+
+- **A table row given as an ARRAY is now read in COLUMN ORDER** rather than DROPPED
+  FROM THE DECK. `rows: [["Starter", "$49"]]` means
+  `[{"plan": "Starter", "price": "$49"}]`. The grid loop tested
+  `isPlainObject(row)` and `continue`d, so an array row vanished -- while the PHP
+  engine kept it and emitted a row of empty cells. Three engines held to
+  byte-identical OOXML disagreed on the ROW COUNT of the same deck, silently.
+
+  **Nothing a consumer did stops working**: a keyed row is unchanged, and an array
+  row produced no row at all before. Pinned cross-language by `fancy-conformance`
+  0.34.0 rows 0029-0033.
+
+### Fixed
+
+- **The PHP schema-parity check compared a HAND LIST of seven element properties**,
+  so `columns` and `rows` -- the two it would most have wanted to see -- sat outside
+  it and went years undescribed in both engines with the check green. It now
+  compares every element property, and asserts the key sets match.
+
 ### Fixed
 - **`CHANGELOG.md` is now in the published tarball.** `files` did not whitelist it, so npm never shipped it — and this package puts breaking changes in MINOR releases and tells you in the README to read the entry before taking one. The instruction existed for the author, who has the file, and not for the consumer, who is the only one being instructed. Nothing for you to do; the file simply arrives from this release on.
 - Dropped `docs` from `files`: it was declared and never existed, so the package claimed to ship it and did not.
