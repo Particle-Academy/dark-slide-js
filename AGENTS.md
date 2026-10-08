@@ -31,10 +31,21 @@ follows that:
   order, self-closing style and the absence of inter-element whitespace are all
   part of the output. `helpers/xml.ts` is an escaper and the writer concatenates
   strings.
-- **`docProps/core.xml` carries a `gmdate()` stamp** PHP offers no way to pin,
-  so the two `<dcterms:*>` values are MASKED before comparison. The Python port
-  records the same divergence in a ledger instead; both are honest, and neither
-  should quietly grow a second entry.
+- **`docProps/core.xml`'s two `<dcterms:*>` values are MASKED before
+  comparison**, and what the mask covers changed in 0.12.0 (dark-slide#10). It
+  used to hide a stamp no caller could influence in either engine. Now all three
+  read `metadata.created` / `metadata.modified` from the deck, with `modified`
+  falling back to `created`, so a deck that supplies them is byte-identical
+  across the trio. **Only the DEFAULT still differs** — PHP and this engine fall
+  back to the clock, the Python port to a 1980 sentinel — which is why the mask
+  stays. The Python port records the same thing in its ledger; both are honest,
+  and neither should quietly grow a second entry.
+
+  Worth knowing that the mask is what let the bug live: a comparison configured
+  not to look at a field asserts nothing about it, and this is the second time
+  that shape has been recorded in this file (see the deck id below). Pinning the
+  fixtures' timestamps would remove the need for the mask; it was left alone
+  because it changes a fixture three parity suites compare on.
 - **The zip container is never compared and never can be.** PHP writes DEFLATE
   with real mtimes; this writes STORE with a fixed 1980 date. The comparison
   unzips both and diffs parts, which is the real contract anyway — a reader sees

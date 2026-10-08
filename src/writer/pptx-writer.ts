@@ -46,6 +46,16 @@ const ENCODER = new TextEncoder();
 /** `<p:embeddedFont>`'s variant children, in the order `CT_EmbeddedFontListEntry` requires. */
 const FONT_VARIANT_ORDER = ["regular", "bold", "italic", "boldItalic"] as const;
 
+/**
+ * A deck-supplied timestamp, or `fallback`. Non-strings and the empty string are
+ * NOT timestamps -- writing `0` or `` into a W3CDTF field would produce a
+ * document a reader can reject, which is worse than the clock. Matches PHP's
+ * `PptxWriter::timestampOr` and Python's `isinstance(x, str) and x != ""`.
+ */
+function timestampOr(value: unknown, fallback: string): string {
+  return typeof value === "string" && value !== "" ? value : fallback;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any;
 
@@ -307,13 +317,40 @@ export class PptxWriter {
     );
   }
 
+  /**
+   * `docProps/core.xml`.
+   *
+   * THE CLOCK IS A DEFAULT, NOT A FACT (dark-slide#10). This embedded
+   * `new Date()` unconditionally, so two `toBytes()` calls on one deck a second
+   * apart produced different bytes -- a save that changed nothing reads as a
+   * change to a content-addressed store or a byte-level diff.
+   *
+   * `dcterms:created` / `dcterms:modified` are legitimately timestamps, so the
+   * clock stays as the default and `metadata.created` / `metadata.modified`
+   * override it. A caller wanting reproducible bytes supplies them; a caller
+   * that does not sees exactly the previous behaviour.
+   *
+   * The two keys, and `modified` falling back to `created` rather than to the
+   * default, are `dark-slide-py`'s rule rather than a new invention -- it has
+   * honoured them since its first release. A consumer writes ONE deck for three
+   * engines, so a second spelling would be this same defect one layer out.
+   *
+   * NOTE the values are escaped. They were generated here before and are
+   * consumer input now.
+   */
   private buildCoreProps(deck: Any): string {
     const title = Xml.text(String(deck?.title ?? "Untitled"));
     const author =
       deck?.metadata?.author !== undefined && deck?.metadata?.author !== null
         ? Xml.text(String(deck.metadata.author))
         : "Dark Slide";
+
     const now = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+    const createdAt = timestampOr(deck?.metadata?.created, now);
+    const modifiedAt = timestampOr(deck?.metadata?.modified, createdAt);
+
+    const created = Xml.text(createdAt);
+    const modified = Xml.text(modifiedAt);
 
     return (
       Xml.declaration() +
@@ -321,8 +358,8 @@ export class PptxWriter {
       `<dc:title>${title}</dc:title>` +
       `<dc:creator>${author}</dc:creator>` +
       `<cp:lastModifiedBy>${author}</cp:lastModifiedBy>` +
-      `<dcterms:created xsi:type="dcterms:W3CDTF">${now}</dcterms:created>` +
-      `<dcterms:modified xsi:type="dcterms:W3CDTF">${now}</dcterms:modified>` +
+      `<dcterms:created xsi:type="dcterms:W3CDTF">${created}</dcterms:created>` +
+      `<dcterms:modified xsi:type="dcterms:W3CDTF">${modified}</dcterms:modified>` +
       "</cp:coreProperties>"
     );
   }
