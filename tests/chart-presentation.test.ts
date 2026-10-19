@@ -119,3 +119,11 @@ describe("chart colours", () => {
     expect(chart(plain as Any)).not.toContain("<c:dPt>");
   });
 });
+
+describe("zero-based bars", () => {
+  it("starts a bar axis at zero, unless a value is negative or it is a line", () => {
+    expect(chart({ xAxis: { data: ["A", "B"] }, series: [{ type: "bar", data: [96.1, 90.7] }] })).toContain('<c:scaling><c:orientation val="minMax"/><c:min val="0"/></c:scaling>');
+    expect(chart({ xAxis: { data: ["A", "B"] }, series: [{ type: "bar", data: [3, -1] }] })).not.toContain('<c:min val="0"/>');
+    expect(chart({ xAxis: { data: ["A", "B"] }, series: [{ type: "line", data: [96, 91] }] })).not.toContain('<c:min val="0"/>');
+  });
+});

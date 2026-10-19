@@ -1973,7 +1973,7 @@ export class PptxWriter {
       '<c:axId val="111111111"/>' +
       '<c:axId val="222222222"/>' +
       "</c:barChart>" +
-      this.buildCatValAxes()
+      this.buildCatValAxes(nonNegative(spec))
     );
   }
 
@@ -2012,7 +2012,7 @@ export class PptxWriter {
         '<c:axId val="111111111"/>' +
         '<c:axId val="222222222"/>' +
         "</c:areaChart>" +
-        this.buildCatValAxes()
+        this.buildCatValAxes(nonNegative(spec))
       );
     }
 
@@ -2098,7 +2098,7 @@ export class PptxWriter {
     );
   }
 
-  private buildCatValAxes(): string {
+  private buildCatValAxes(zeroBase = false): string {
     return (
       "<c:catAx>" +
       '<c:axId val="111111111"/>' +
@@ -2113,7 +2113,7 @@ export class PptxWriter {
       "</c:catAx>" +
       "<c:valAx>" +
       '<c:axId val="222222222"/>' +
-      '<c:scaling><c:orientation val="minMax"/></c:scaling>' +
+      '<c:scaling><c:orientation val="minMax"/>' + (zeroBase ? '<c:min val="0"/>' : "") + "</c:scaling>" +
       '<c:delete val="0"/>' +
       '<c:axPos val="l"/>' +
       '<c:majorTickMark val="none"/>' +
@@ -2717,4 +2717,12 @@ function getImageSize(bytes: Uint8Array): [number, number] | null {
     }
   }
   return null;
+}
+
+/**
+ * Every plotted value is zero or more: a bar or area chart's value axis then
+ * starts at zero. Mirrors PHP PptxWriter::nonNegative.
+ */
+function nonNegative(spec: ChartSpec): boolean {
+  return spec.series.every((series) => (Array.isArray(series.values) ? series.values : []).every((v) => Number(v) >= 0));
 }

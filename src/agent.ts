@@ -16,7 +16,7 @@ import { PptxWriter } from "./writer/pptx-writer";
 import { lintDeck, type LintFinding } from "./lint";
 
 /** This package's own version, pinned to package.json by `version.test.ts`. */
-export const VERSION = "0.17.0";
+export const VERSION = "0.17.1";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any;
