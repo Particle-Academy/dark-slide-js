@@ -12,9 +12,10 @@ import { Schema } from "./schema/schema";
 import type { RepairResult, ValidationError, WriteOptions, WriteResult } from "./schema/types";
 import { Validator } from "./schema/validator";
 import { PptxWriter } from "./writer/pptx-writer";
+import { lintDeck, type LintFinding } from "./lint";
 
 /** This package's own version, pinned to package.json by `version.test.ts`. */
-export const VERSION = "0.13.0";
+export const VERSION = "0.14.0";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any;
@@ -96,6 +97,14 @@ export const Agent = {
   /** Alias for {@see read}. */
   fromBytes(input: Uint8Array | ArrayBuffer): Record<string, unknown> {
     return new PptxReader().read(toU8(input));
+  },
+
+  /**
+   * Layout problems that will show on the slides, read-only. Mirrors PHP
+   * `Agent::lint`; hand the findings back to the agent that built the deck.
+   */
+  lint(deck: Any): LintFinding[] {
+    return lintDeck(deck);
   },
 
   /** Plain-text summary of a deck. Mirrors PHP `Agent::describe`. */

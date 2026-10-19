@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-10-19
+
+### Added
+
+- **`Agent.lint(deck)`** (and `lintDeck`, `LintFinding`): layout problems that
+  will show on the slides, from the deck alone -- `text-overflow`, `overlap`,
+  `off-slide`, `kpi-overflow`, `small-text`, each with a message an agent can act
+  on. Read-only. Same rules and byte-identical messages as
+  `particle-academy/dark-slide` 0.16.0 and `fancy-dark-slide` 0.9.0. **Nothing to
+  do**: nothing calls it for you.
+
 ## [0.13.0] - 2026-10-19
 
 Native charts now look like the chart fancy-slides draws from the same option.
