@@ -4,6 +4,7 @@
  * and Node-only (browsers have no sync FS).
  */
 
+import agentGuide from "./agent-guide.json";
 import { SchemaException } from "./exceptions";
 import { EmbeddedFonts } from "./fonts/embedded-fonts";
 import { PptxReader } from "./reader/pptx-reader";
@@ -15,7 +16,7 @@ import { PptxWriter } from "./writer/pptx-writer";
 import { lintDeck, type LintFinding } from "./lint";
 
 /** This package's own version, pinned to package.json by `version.test.ts`. */
-export const VERSION = "0.16.1";
+export const VERSION = "0.17.0";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any;
@@ -135,6 +136,15 @@ export const Agent = {
   /** JSON Schema export for LLM tool-use registration. */
   jsonSchema(): Record<string, unknown> {
     return Schema.jsonSchema();
+  },
+
+  /**
+   * The agent guide: what makes this kind of file professional, and the schema
+   * idioms that produce it. Give it to a model with the schema; it works with any
+   * agent loop. Byte-identical to the PHP package's agent-guide/professional-decks.md.
+   */
+  guide(): string {
+    return (agentGuide as { guide: string }).guide;
   },
 
   version(): string {
