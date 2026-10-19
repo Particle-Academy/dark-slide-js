@@ -11,6 +11,10 @@ export interface ChartSeries {
   points: { x: number; y: number }[];
   /** ECharts' `label.show`: the series' values drawn on the chart. */
   labels: boolean;
+  /** ECharts' series `itemStyle.color`, upper-case hex without '#'. */
+  color: string | null;
+  /** Points with an `itemStyle.color` of their own. */
+  pointColors: { index: number; color: string }[];
 }
 export interface ChartSpec {
   kind: string;
@@ -19,6 +23,8 @@ export interface ChartSpec {
   series: ChartSeries[];
   /** Only when `option.legend` is set and not switched off, as ECharts draws it. */
   legend: boolean;
+  /** `option.color`, ECharts' palette; [] for the default. */
+  palette: string[];
 }
 
 /**
@@ -68,7 +74,7 @@ export const ChartTranslator = {
 
     if (series.length === 0 || kind === null) return null;
 
-    return { kind, title: extractTitle(option), categories, series, legend: wantsLegend(option) };
+    return { kind, title: extractTitle(option), categories, series, legend: wantsLegend(option), palette: palette(option) };
   },
 };
 
@@ -118,6 +124,11 @@ function normaliseSeries(raw: Any, type: string): ChartSeries | null {
 
   const values: number[] = [];
   const points: { x: number; y: number }[] = [];
+  const pointColors: { index: number; color: string }[] = [];
+  data.forEach((point: Any, i: number) => {
+    const pointColor = type === "scatter" ? null : itemColor(point);
+    if (pointColor !== null) pointColors.push({ index: i, color: pointColor });
+  });
   for (const point of data) {
     if (type === "scatter") {
       const xy = scatterPoint(point);
@@ -132,7 +143,32 @@ function normaliseSeries(raw: Any, type: string): ChartSeries | null {
 
   const area = type === "line" && raw.areaStyle !== undefined;
   const labels = isPlainObject(raw.label) && raw.label.show === true;
-  return { type, name, values, smooth: !!raw.smooth, area, points, labels };
+  return { type, name, values, smooth: !!raw.smooth, area, points, labels, color: itemColor(raw), pointColors };
+}
+
+/** `option.color`, ECharts' palette. Mirrors PHP ChartTranslator::palette. */
+function palette(option: Any): string[] {
+  const colors = option.color;
+  if (!Array.isArray(colors) && !isPlainObject(colors)) return [];
+  const out: string[] = [];
+  for (const color of Object.values(colors as Record<string, unknown>)) {
+    const hex = hexColor(color);
+    if (hex !== null) out.push(hex);
+  }
+  return out;
+}
+
+/** `#RRGGBB` as upper-case hex without the '#', or null. */
+function hexColor(color: unknown): string | null {
+  const m = typeof color === "string" ? /^#([0-9A-Fa-f]{6})$/.exec(color) : null;
+  return m ? m[1]!.toUpperCase() : null;
+}
+
+/** `itemStyle.color` of a series or a data item, or null. */
+function itemColor(holder: Any): string | null {
+  if (!isPlainObject(holder) && !Array.isArray(holder)) return null;
+  const style: Any = (holder as Any).itemStyle;
+  return isPlainObject(style) || Array.isArray(style) ? hexColor((style as Any).color) : null;
 }
 
 /** Whether the chart draws a legend: only when `option.legend` is set and not switched off. */

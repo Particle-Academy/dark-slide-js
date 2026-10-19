@@ -69,3 +69,53 @@ describe("chart presentation", () => {
     expect(part(deck({ stroke: "#000000" }), "ppt/slides/slide1.xml")).toContain('<a:srgbClr val="000000"');
   });
 });
+
+/** Chart colours, as ECharts states them. Mirrors PHP tests/Unit/ChartColorsTest.php. */
+describe("chart colours", () => {
+  const ccBars = (): Any => ({
+    xAxis: { type: "category", data: ["Leeds", "Bristol", "Glasgow", "Norwich"] },
+    yAxis: { type: "value" },
+    series: [{ type: "bar", itemStyle: { color: "#94A3B8" }, data: [96.1, 95.4, 93.8, { value: 90.7, itemStyle: { color: "#DC2626" } }] }],
+  });
+
+  it("colours a series and a single bar from itemStyle", () => {
+    const xml = chart(ccBars());
+    expect(xml).toContain('<c:spPr><a:solidFill><a:srgbClr val="94A3B8"/></a:solidFill></c:spPr>');
+    expect(xml).toContain(
+      '<c:dPt><c:idx val="3"/><c:invertIfNegative val="0"/><c:bubble3D val="0"/><c:spPr><a:solidFill><a:srgbClr val="DC2626"/></a:solidFill></c:spPr></c:dPt>',
+    );
+    expect(xml.indexOf("<c:dPt>")).toBeGreaterThan(xml.indexOf('val="94A3B8"'));
+    expect(xml.indexOf("<c:dPt>")).toBeLessThan(xml.indexOf("<c:cat>"));
+  });
+
+  it("takes the palette from option.color", () => {
+    const xml = chart({ color: ["#0F766E", "#F59E0B"], xAxis: { type: "category", data: ["A", "B"] }, series: [{ type: "bar", data: [1, 2] }, { type: "bar", data: [3, 4] }] });
+    expect(xml).toContain('<a:srgbClr val="0F766E"/>');
+    expect(xml).toContain('<a:srgbClr val="F59E0B"/>');
+    expect(xml).not.toContain('val="EC4899"');
+  });
+
+  it("colours pie slices from the palette and from a slice of their own", () => {
+    const xml = chart({
+      color: ["#0F766E", "#CBD5E1"],
+      series: [{ type: "pie", data: [{ name: "Cited reconciliation", value: 41, itemStyle: { color: "#C2410C" } }, { name: "Other reasons", value: 59 }] }],
+    });
+    expect(xml).toContain('<c:dPt><c:idx val="0"/><c:bubble3D val="0"/><c:spPr><a:solidFill><a:srgbClr val="C2410C"/></a:solidFill></c:spPr></c:dPt>');
+    expect(xml).toContain('<c:dPt><c:idx val="1"/><c:bubble3D val="0"/><c:spPr><a:solidFill><a:srgbClr val="CBD5E1"/></a:solidFill></c:spPr></c:dPt>');
+    expect(xml).not.toContain("EC4899");
+  });
+
+  it("colours a line marker for a single point", () => {
+    const xml = chart({ xAxis: { type: "category", data: ["Q1", "Q2", "Q3"] }, series: [{ type: "line", data: [1, 2, { value: 3, itemStyle: { color: "#DC2626" } }] }] });
+    expect(xml).toContain(
+      '<c:dPt><c:idx val="2"/><c:marker><c:symbol val="circle"/><c:size val="7"/><c:spPr><a:solidFill><a:srgbClr val="DC2626"/></a:solidFill><a:ln><a:solidFill><a:srgbClr val="DC2626"/></a:solidFill></a:ln></c:spPr></c:marker><c:bubble3D val="0"/></c:dPt>',
+    );
+  });
+
+  it("writes what it always did when the option names no colour", () => {
+    const plain = ccBars() as { series: Any[] };
+    delete plain.series[0]!.itemStyle;
+    (plain.series[0]!.data as unknown[])[3] = 90.7;
+    expect(chart(plain as Any)).not.toContain("<c:dPt>");
+  });
+});

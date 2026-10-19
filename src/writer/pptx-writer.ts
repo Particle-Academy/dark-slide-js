@@ -124,6 +124,8 @@ export class PptxWriter {
   static readonly NS_DARK_SLIDE = "urn:particle-academy:dark-slide";
 
   private themeAccent = "8B5CF6";
+  /** The chart being written's own palette (ECharts option.color), or [] for the default. */
+  private chartPalette: string[] = [];
 
   /** The deck's theme, kept whole so the table resolver can read its colours and DesignUnits its canvas. */
   private deckTheme: Any = {};
@@ -1897,6 +1899,7 @@ export class PptxWriter {
 
   private buildChartPart(spec: ChartSpec): string {
     const kind = spec.kind;
+    this.chartPalette = spec.palette ?? [];
     let plot: string;
     switch (kind) {
       case "bar":
@@ -1953,7 +1956,8 @@ export class PptxWriter {
         '<c:idx val="' + idx + '"/>' +
         '<c:order val="' + idx + '"/>' +
         this.chartSeriesName(series, idx) +
-        this.chartSeriesFill(idx) +
+        this.chartSeriesFill(idx, series) +
+        this.chartPointColors(series, "bar") +
         this.chartDataLabels(series, "outEnd") +
         this.chartCatRef(spec.categories, series.values) +
         this.chartValRef(series.values) +
@@ -1990,7 +1994,8 @@ export class PptxWriter {
         '<c:idx val="' + idx + '"/>' +
         '<c:order val="' + idx + '"/>' +
         this.chartSeriesName(series, idx) +
-        this.chartSeriesLine(idx) +
+        this.chartSeriesLine(idx, series) +
+        this.chartPointColors(series, isArea ? "area" : "line") +
         this.chartDataLabels(series, isArea ? null : "t") +
         this.chartCatRef(spec.categories, series.values) +
         this.chartValRef(series.values) +
@@ -2029,13 +2034,15 @@ export class PptxWriter {
     const values: number[] = Array.isArray(series.values) ? series.values : [];
     const categories = spec.categories;
 
+    const own = new Map<number, string>();
+    for (const p of Array.isArray(series.pointColors) ? series.pointColors : []) own.set(p.index, p.color);
     let dPts = "";
     values.forEach((_, idx) => {
       dPts +=
         "<c:dPt>" +
         '<c:idx val="' + idx + '"/>' +
         '<c:bubble3D val="0"/>' +
-        '<c:spPr><a:solidFill><a:srgbClr val="' + this.chartColor(idx) + '"/></a:solidFill></c:spPr>' +
+        '<c:spPr><a:solidFill><a:srgbClr val="' + (own.get(idx) ?? this.chartColor(idx)) + '"/></a:solidFill></c:spPr>' +
         "</c:dPt>";
     });
 
@@ -2140,12 +2147,29 @@ export class PptxWriter {
     );
   }
 
-  private chartSeriesFill(idx: number): string {
-    return '<c:spPr><a:solidFill><a:srgbClr val="' + this.chartColor(idx) + '"/></a:solidFill></c:spPr>';
+  private chartSeriesFill(idx: number, series?: ChartSpec["series"][number]): string {
+    return '<c:spPr><a:solidFill><a:srgbClr val="' + (series?.color ?? this.chartColor(idx)) + '"/></a:solidFill></c:spPr>';
   }
 
-  private chartSeriesLine(idx: number): string {
-    return '<c:spPr><a:ln w="28575"><a:solidFill><a:srgbClr val="' + this.chartColor(idx) + '"/></a:solidFill></a:ln></c:spPr>';
+  /** A point coloured on its own. Mirrors PHP PptxWriter::chartPointColors. */
+  private chartPointColors(series: ChartSpec["series"][number], shape: "bar" | "line" | "area"): string {
+    let out = "";
+    for (const p of series.pointColors ?? []) {
+      const solid = '<a:solidFill><a:srgbClr val="' + p.color + '"/></a:solidFill>';
+      out +=
+        '<c:dPt><c:idx val="' + p.index + '"/>' +
+        (shape === "line"
+          ? '<c:marker><c:symbol val="circle"/><c:size val="7"/><c:spPr>' + solid + "<a:ln>" + solid + "</a:ln></c:spPr></c:marker><c:bubble3D val=\"0\"/>"
+          : shape === "area"
+            ? '<c:bubble3D val="0"/><c:spPr>' + solid + "</c:spPr>"
+            : '<c:invertIfNegative val="0"/><c:bubble3D val="0"/><c:spPr>' + solid + "</c:spPr>") +
+        "</c:dPt>";
+    }
+    return out;
+  }
+
+  private chartSeriesLine(idx: number, series?: ChartSpec["series"][number]): string {
+    return '<c:spPr><a:ln w="28575"><a:solidFill><a:srgbClr val="' + (series?.color ?? this.chartColor(idx)) + '"/></a:solidFill></a:ln></c:spPr>';
   }
 
   private chartCatRef(categoriesInput: string[], values: number[]): string {
@@ -2186,6 +2210,9 @@ export class PptxWriter {
   }
 
   private chartColor(idx: number): string {
+    if (this.chartPalette.length > 0) {
+      return this.chartPalette[idx % this.chartPalette.length]!;
+    }
     if (idx === 0) {
       return this.themeAccent;
     }

@@ -10,7 +10,7 @@ import { isNumeric, isPlainObject } from "./util";
 type Any = any;
 
 export interface LintFinding {
-  code: "text-overflow" | "overlap" | "off-slide" | "kpi-overflow" | "small-text";
+  code: "text-overflow" | "overlap" | "off-slide" | "kpi-overflow" | "small-text" | "literal-markdown";
   /** 1-based. */
   slide: number;
   element: string;
@@ -91,6 +91,23 @@ export function lintDeck(deck: Any): LintFinding[] {
             ),
           );
         }
+      }
+
+      // Markdown in a box that is not markdown prints its markers as typed.
+      if (
+        (type === "text" || type === "shape") &&
+        typeof el.content === "string" &&
+        (el.format ?? "plain") !== "markdown" &&
+        /\*\*[^*\n]+\*\*|(^|\n)#{1,6}[ \t]/.test(el.content)
+      ) {
+        findings.push(
+          finding(
+            "literal-markdown",
+            slideNo,
+            id,
+            'This text uses markdown (**bold** or a # heading) but its format is not "markdown", so the markers print as typed. Set "format": "markdown", or remove the markers.',
+          ),
+        );
       }
 
       if (type === "kpiBand") {
