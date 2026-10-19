@@ -46,3 +46,21 @@ describe("unstyled text colour", () => {
     expect(slideXml({})).toContain('<a:srgbClr val="0F172A"/>');
   });
 });
+
+describe("tables on a dark theme", () => {
+  it("colours table text and stripes from the theme, so a dark deck can read its table", () => {
+    const deck = {
+      id: "t", title: "T",
+      theme: { name: "dark", colors: { background: "#0B1220", text: "#F9FAFB", accent: "#38BDF8" } },
+      slides: [{ id: "s1", elements: [{
+        id: "tb", type: "table", x: 0.1, y: 0.2, w: 0.8, h: 0.5,
+        columns: [{ key: "k", label: "KPI" }, { key: "v", label: "Actual" }],
+        rows: [{ k: "On-time", v: "94.2%" }, { k: "Damage", v: "0.6%" }],
+      }] }],
+    };
+    const xml = new TextDecoder().decode(unzipSync(new PptxWriter().toBytes(deck as never))["ppt/slides/slide1.xml"]!);
+    expect(xml).not.toContain('val="0F172A"');
+    expect(xml).not.toContain('val="F8FAFC"');
+    expect(xml).toContain('<a:srgbClr val="F9FAFB"/>');
+  });
+});

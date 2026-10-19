@@ -39,7 +39,7 @@
  */
 
 import { Emu } from "../helpers/emu";
-import { parseXml, el, at, type XmlNode } from "./xml";
+import { parseXml, el, els, at, type XmlNode } from "./xml";
 import { crc32, unzipSync } from "../zip";
 
 const DECODER = new TextDecoder();
@@ -927,7 +927,7 @@ export class PptxReader {
 
     const tbl = descendant(gf, "tbl");
     if (!tbl) {
-      return null;
+      return this.parseChartFrame(gf, offset, extent);
     }
 
     const rows = descendants(tbl, "tr");
@@ -987,6 +987,129 @@ export class PptxReader {
       h: this.fracY(parseInt(at(extent, "cy") ?? "0", 10) || 0),
       columns,
       rows: bodyRows,
+    };
+  }
+
+  /**
+   * A native chart, back as the ECharts option that writes it. Mirrors PHP
+   * `PptxReader::parseChartFrame` step for step.
+   */
+  private parseChartFrame(gf: XmlNode, offset: XmlNode, extent: XmlNode): Record<string, Any> | null {
+    const ref = descendant(gf, "chart");
+    const rid = ref ? (at(ref, "id") ?? "") : "";
+    const target = this.currentSlideRels[rid]?.target;
+    const xml = target !== undefined ? this.getPart(target) : false;
+    const root = xml === false || /<!DOCTYPE/i.test(xml) ? null : parseXml(xml);
+    if (!root) {
+      return null;
+    }
+
+    const chartEl = root.name === "chart" ? root : descendant(root, "chart");
+    const plotArea = descendant(root, "plotArea");
+    let plot: XmlNode | undefined;
+    let tag = "";
+    for (const candidate of ["barChart", "lineChart", "areaChart", "pieChart", "scatterChart"]) {
+      plot = el(plotArea, candidate);
+      if (plot) {
+        tag = candidate;
+        break;
+      }
+    }
+    if (!plot) {
+      return null;
+    }
+    const type = tag === "barChart" ? "bar" : tag === "pieChart" ? "pie" : tag === "scatterChart" ? "scatter" : "line";
+
+    let categories: string[] = [];
+    const series: Any[] = [];
+    for (const ser of els(plot, "ser")) {
+      if (categories.length === 0 && type !== "scatter") {
+        categories = chartPoints(ser, "cat");
+      }
+      const one: Any = { type };
+      const name = descendant(el(ser, "tx"), "v");
+      if (name) {
+        one.name = deepText(name);
+      }
+      const colorNode =
+        tag === "lineChart"
+          ? el(el(el(el(ser, "spPr"), "ln"), "solidFill"), "srgbClr")
+          : tag === "pieChart" || tag === "scatterChart"
+            ? undefined
+            : el(el(el(ser, "spPr"), "solidFill"), "srgbClr");
+      const colorVal = (at(colorNode, "val") ?? "").toUpperCase();
+      if (colorNode && /^[0-9A-F]{6}$/.test(colorVal)) {
+        one.itemStyle = { color: "#" + colorVal };
+      }
+      if (tag === "areaChart") {
+        one.areaStyle = {};
+      }
+      if (at(el(ser, "smooth"), "val") === "1") {
+        one.smooth = true;
+      }
+      if (at(el(el(ser, "dLbls"), "showVal"), "val") === "1") {
+        one.label = { show: true };
+      }
+
+      let data: Any[];
+      if (type === "scatter") {
+        const xs = chartPoints(ser, "xVal");
+        const ys = chartPoints(ser, "yVal");
+        data = xs.map((x, i) => [phpFloat(x), phpFloat(ys[i] ?? "0")]);
+      } else {
+        const pointColors = new Map<number, string>();
+        for (const dPt of els(ser, "dPt")) {
+          const idx = at(el(dPt, "idx"), "val") ?? "";
+          const clr = (at(descendant(dPt, "srgbClr"), "val") ?? "").toUpperCase();
+          if (/^[0-9]+$/.test(idx) && /^[0-9A-F]{6}$/.test(clr)) {
+            pointColors.set(parseInt(idx, 10), "#" + clr);
+          }
+        }
+        data = chartPoints(ser, "val").map((v, i) => {
+          const value = phpFloat(v);
+          const own = pointColors.get(i);
+          if (type === "pie") {
+            const point: Any = { name: categories[i] ?? "", value };
+            if (own !== undefined) point.itemStyle = { color: own };
+            return point;
+          }
+          return own !== undefined ? { value, itemStyle: { color: own } } : value;
+        });
+      }
+      one.data = data;
+      series.push(one);
+    }
+    if (series.length === 0) {
+      return null;
+    }
+
+    const option: Any = {};
+    const titleEl = el(chartEl, "title");
+    const title = titleEl ? descendants(titleEl, "t").map((t) => deepText(t)).join("") : "";
+    if (title !== "") {
+      option.title = { text: title };
+    }
+    if (el(chartEl, "legend")) {
+      option.legend = {};
+    }
+    if (type === "scatter") {
+      option.xAxis = { type: "value" };
+      option.yAxis = { type: "value" };
+    } else if (type !== "pie") {
+      option.xAxis = { type: "category", data: categories };
+      option.yAxis = { type: "value" };
+    }
+    option.series = series;
+
+    const cNvPr = descendant(gf, "cNvPr");
+    return {
+      id: (cNvPr ? at(cNvPr, "name") : undefined) ?? this.nextFallbackId("imported-chart-"),
+      type: "chart",
+      x: this.fracX(parseInt(at(offset, "x") ?? "0", 10) || 0),
+      y: this.fracY(parseInt(at(offset, "y") ?? "0", 10) || 0),
+      w: this.fracX(parseInt(at(extent, "cx") ?? "0", 10) || 0),
+      h: this.fracY(parseInt(at(extent, "cy") ?? "0", 10) || 0),
+      option,
     };
   }
 
@@ -1127,6 +1250,30 @@ export class PptxReader {
 }
 
 // ─── Module helpers ──────────────────────────────────────────────────────
+
+/**
+ * A series' cached points under its `host` child (cat, val, xVal, yVal), in
+ * index order; an index with no point is "". Mirrors PHP `chartPoints`.
+ */
+function chartPoints(ser: XmlNode, host: string): string[] {
+  const h = el(ser, host);
+  const count = parseInt(at(descendant(h, "ptCount"), "val") ?? "0", 10) || 0;
+  const out: string[] = new Array(Math.max(0, count)).fill("");
+  for (const pt of descendants(h, "pt")) {
+    const idx = parseInt(at(pt, "idx") ?? "0", 10) || 0;
+    if (idx >= 0 && idx < count) {
+      const v = el(pt, "v");
+      out[idx] = v ? deepText(v) : "";
+    }
+  }
+  return out;
+}
+
+/** PHP `(float)` of a numeric cache string; "" is 0. */
+function phpFloat(v: string): number {
+  const n = Number(v);
+  return v.trim() === "" || Number.isNaN(n) ? 0 : n;
+}
 
 interface ParsedRun {
   text: string;

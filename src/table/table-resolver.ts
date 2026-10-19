@@ -128,7 +128,8 @@ export const TableResolver = {
     const stripeStyle: Any = isPlainObject(stripeSpec) ? stripeSpec : {};
 
     const tableDefaults: Any = {
-      color: DEFAULT_BODY_COLOR,
+      // The theme's text colour, as a text box takes it. Mirrors PHP.
+      color: themeColor(theme, "text", DEFAULT_BODY_COLOR),
       align: "left",
       anchor: "middle",
       fontSize: DEFAULT_FONT_SIZE,
@@ -154,7 +155,7 @@ export const TableResolver = {
       if (!isHeader && stripeOn) {
         const bodyIndex = hasHeader ? r - 1 : r;
         if (bodyIndex % 2 === 1) {
-          bandStyle = { ...bandStyle, fill: DEFAULT_STRIPE_FILL, ...stripeStyle };
+          bandStyle = { ...bandStyle, ...stripeDefaults(theme), ...stripeStyle };
         }
       }
 
@@ -525,6 +526,38 @@ function rowHeight(rowSource: Any, bandStyle: Any, tableStyle: Any, isHeader: bo
 }
 
 // ─── Small coercions ────────────────────────────────────────────────────────
+
+/**
+ * The stripe band: the theme's surface; on a DARK theme without one, the
+ * background blended 8% toward the text colour; otherwise the light default.
+ * Mirrors PHP TableResolver::stripeDefaults.
+ */
+function stripeDefaults(theme: Any): Any {
+  const colors: Any = isPlainObject(theme?.colors) ? theme.colors : {};
+  if (typeof colors.surface === "string" && colors.surface !== "") return { fill: colors.surface };
+  const bg = typeof colors.background === "string" ? hex(colors.background, "FFFFFF") : "FFFFFF";
+  if (luminance(bg) < 0.5) {
+    const text = hex(themeColor(theme, "text", "#F9FAFB"), "F9FAFB");
+    return { fill: "#" + blend(bg, text, 8) };
+  }
+  return { fill: DEFAULT_STRIPE_FILL };
+}
+
+/** Relative brightness 0..1 (Rec. 601 weights, integer channels). Mirrors PHP. */
+function luminance(h: string): number {
+  return (299 * parseInt(h.slice(0, 2), 16) + 587 * parseInt(h.slice(2, 4), 16) + 114 * parseInt(h.slice(4, 6), 16)) / 255000;
+}
+
+/** a moved percent% of the way to b, per channel, truncating toward zero. Mirrors PHP. */
+function blend(a: string, b: string, percent: number): string {
+  let out = "";
+  for (const i of [0, 2, 4]) {
+    const x = parseInt(a.slice(i, i + 2), 16);
+    const y = parseInt(b.slice(i, i + 2), 16);
+    out += (x + Math.trunc(((y - x) * percent) / 100)).toString(16).toUpperCase().padStart(2, "0");
+  }
+  return out;
+}
 
 function themeColor(theme: Any, key: string, fallback: string): string {
   const colors: Any = isPlainObject(theme?.colors) ? theme.colors : {};

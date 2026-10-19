@@ -106,3 +106,30 @@ describe("the reader keeps styling", () => {
     expect(again.slide).toBe(original.slide);
   });
 });
+
+describe("charts on read", () => {
+  it("reads a native chart back as the ECharts option that writes it", () => {
+    const option = {
+      color: ["#38BDF8", "#F59E0B"],
+      legend: {},
+      xAxis: { type: "category", data: ["Leeds", "Bristol", "Norwich"] },
+      yAxis: { type: "value" },
+      series: [
+        { type: "bar", name: "On-time %", label: { show: true }, data: [96.1, 95.4, { value: 90.7, itemStyle: { color: "#DC2626" } }] },
+        { type: "bar", name: "Target", data: [95, 95, 95] },
+      ],
+    };
+    const deck = rksDeck();
+    deck.slides[0].elements = [{ id: "depot-chart", type: "chart", x: 0.06, y: 0.2, w: 0.6, h: 0.6, option }];
+    const el = read(deck).slides[0].elements[0];
+    expect(el).toMatchObject({ id: "depot-chart", type: "chart" });
+    expect(el.option.xAxis.data).toStrictEqual(["Leeds", "Bristol", "Norwich"]);
+    expect(el.option.series[0].name).toBe("On-time %");
+    expect(el.option.series[0].label).toStrictEqual({ show: true });
+    expect(el.option.series[0].data[2]).toStrictEqual({ value: 90.7, itemStyle: { color: "#DC2626" } });
+    expect(el.option).toHaveProperty("legend");
+
+    const chartPart = (bytes: Uint8Array): string => new TextDecoder().decode(unzipSync(bytes)["ppt/charts/chart1.xml"]!);
+    expect(chartPart(Agent.toBytes(read(deck)))).toBe(chartPart(Agent.toBytes(deck)));
+  });
+});
