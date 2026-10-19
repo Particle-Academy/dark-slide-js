@@ -148,3 +148,16 @@ describe("Agent.lint literal markdown", () => {
     ]);
   });
 });
+
+describe("Agent.lint word wrap", () => {
+  it("wraps by WORD, as a renderer does", () => {
+    const findings = Agent.lint(
+      deck([
+        { id: "title", type: "text", x: 0.06, y: 0.27, w: 0.54, h: 0.5, content: "Q3 Business Review", style: { fontSize: 150, weight: 700 } },
+        { id: "sub", type: "text", x: 0.06, y: 0.79, w: 0.54, h: 0.12, content: "Regional revenue results", style: { fontSize: 44 } },
+      ]) as never,
+    );
+    expect(findings.map((f) => f.code)).toStrictEqual(["text-overflow", "overlap", "overlap"]);
+    expect(findings[0]!.message.startsWith("At 150px this text needs about 0.54 of the slide height and its box is 0.5:")).toBe(true);
+  });
+});

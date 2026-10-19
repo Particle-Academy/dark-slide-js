@@ -176,9 +176,28 @@ function textHeight(el: Any, style: Any, font: number, boxW: number, canvasW: nu
   let lines = 0;
   for (const line of content.split("\n")) {
     const plain = line.replace(/\*\*|__|`/g, "").replace(/^[ \t]*[-*][ \t]+/, "").replace(/^#+[ \t]+/, "");
-    lines += Math.max(1, Math.ceil((chars(plain) * glyph) / usable));
+    lines += wrappedLines(plain, Math.max(1, Math.floor(usable / glyph)));
   }
   return lines * LINE * font + 2 * padY;
+}
+
+/** Lines one paragraph takes, wrapped greedily by WORD. Mirrors PHP Lint::wrappedLines. */
+function wrappedLines(text: string, perLine: number): number {
+  let lines = 1;
+  let used = 0;
+  for (const word of text.split(/[ \t]+/)) {
+    const n = chars(word);
+    if (n === 0) continue;
+    if (used > 0 && used + 1 + n <= perLine) {
+      used += 1 + n;
+      continue;
+    }
+    if (used > 0) lines++;
+    const extra = Math.floor((n - 1) / perLine);
+    lines += extra;
+    used = n - extra * perLine;
+  }
+  return lines;
 }
 
 function padding(style: Any, canvasW: number): [number, number] {
