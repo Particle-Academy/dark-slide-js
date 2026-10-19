@@ -203,9 +203,11 @@ describe("read() is a pure function of its bytes", () => {
   it("gives two byte layouts of one structure the SAME id", () => {
     // THE property. Everything else in this file is a corollary of it.
     //
-    // A shape element is the cheap way to induce it: our own writer does not
-    // re-serialise a read-back shape to the same `ppt/slides/slide1.xml` bytes,
-    // so these two packages genuinely differ on disk while reading to one deck.
+    // A rounded rectangle's corner radius is the cheap way to induce it: the
+    // reader does not model the radius, so writing what it read emits the
+    // default corner and these two packages genuinely differ on disk while
+    // reading to one deck. (This used to be a shape's fill, until the reader
+    // learned fills in 0.15, as PHP did in 0.17.)
     // The byte-difference is asserted first, because a test where the two
     // buffers happened to be identical would pass while proving nothing.
     const deck = {
@@ -217,7 +219,7 @@ describe("read() is a pure function of its bytes", () => {
           id: "s1",
           layout: "blank",
           elements: [
-            { id: "r1", type: "shape", shape: "rect", x: 0.1, y: 0.1, w: 0.3, h: 0.3, fill: "#FF0000" },
+            { id: "r1", type: "shape", shape: "rounded-rect", x: 0.1, y: 0.1, w: 0.3, h: 0.3, fill: "#FF0000", radius: 24 },
           ],
         },
       ],

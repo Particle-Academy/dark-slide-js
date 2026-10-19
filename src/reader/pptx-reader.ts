@@ -337,6 +337,7 @@ export class PptxReader {
     };
 
     this.monoTypeface = this.readMonoTypeface();
+    Object.assign(deck.theme, this.readTheme());
     this.readSlideSize();
     // 16:9 at 10in is the default and says nothing; any other shape is part of
     // the deck and comes back as its aspect ratio.
@@ -375,6 +376,116 @@ export class PptxReader {
     }
 
     return deck;
+  }
+
+  /**
+   * The theme's colours and fonts, in the deck's own keys. Mirrors PHP
+   * `PptxReader::readTheme`: background = lt1, text = dk1, accent = accent1,
+   * muted = dk2, surface = lt2; heading = major font, body = minor font; mono
+   * only when NAMED (the writer's Consolas default is not reported, so a read
+   * stays a fixed point of write-then-read).
+   */
+  private readTheme(): Record<string, Any> {
+    const xml = this.getPart("ppt/theme/theme1.xml");
+    const root = xml === false || /<!DOCTYPE/i.test(xml) ? null : parseXml(xml);
+    if (!root) {
+      return {};
+    }
+
+    const clrScheme = descendant(root, "clrScheme");
+    const colors: Record<string, string> = {};
+    for (const [key, slot] of [
+      ["background", "lt1"],
+      ["text", "dk1"],
+      ["accent", "accent1"],
+      ["muted", "dk2"],
+      ["surface", "lt2"],
+    ] as const) {
+      const node = el(clrScheme, slot);
+      const hex = node ? schemeHex(node) : null;
+      if (hex !== null) {
+        colors[key] = "#" + hex;
+      }
+    }
+
+    const fontScheme = descendant(root, "fontScheme");
+    const fonts: Record<string, string> = {};
+    for (const [key, slot] of [
+      ["heading", "majorFont"],
+      ["body", "minorFont"],
+    ] as const) {
+      const face = at(el(el(fontScheme, slot), "latin"), "typeface") ?? "";
+      if (face !== "") {
+        fonts[key] = face;
+      }
+    }
+    if (this.monoTypeface !== "" && this.monoTypeface !== "Consolas") {
+      fonts.mono = this.monoTypeface;
+    }
+
+    const out: Record<string, Any> = {};
+    if (Object.keys(colors).length > 0) out.colors = colors;
+    if (Object.keys(fonts).length > 0) out.fonts = fonts;
+    return out;
+  }
+
+  /** A shape's fill and outline. Mirrors PHP `PptxReader::shapePaint`. */
+  private shapePaint(sp: XmlNode): Record<string, Any> {
+    const spPr = el(sp, "spPr");
+    if (!spPr) {
+      return {};
+    }
+    const out: Record<string, Any> = {};
+    const solid = el(spPr, "solidFill");
+    if (el(spPr, "noFill")) {
+      out.fill = "transparent";
+    } else if (solid) {
+      const color = solidFillColor(solid);
+      if (color !== null) out.fill = color;
+    }
+
+    const ln = el(spPr, "ln");
+    if (ln) {
+      const lnSolid = el(ln, "solidFill");
+      const lnColor = lnSolid ? solidFillColor(lnSolid) : null;
+      if (el(ln, "noFill")) {
+        out.stroke = "transparent";
+      } else if (lnColor !== null) {
+        out.stroke = lnColor;
+        const w = at(ln, "w") ?? "";
+        if (/^[0-9]+$/.test(w)) {
+          out.strokeWidth = pxFromEmu(parseInt(w, 10));
+        }
+        if (el(ln, "prstDash")) {
+          out.dashed = true;
+        }
+      }
+    }
+    return out;
+  }
+
+  /** A text body's element-level style. Mirrors PHP `PptxReader::textStyle`. */
+  private textStyle(tBody: XmlNode, runs: ParsedRun[]): Record<string, Any> {
+    const style: Record<string, Any> = {};
+    const first = runs.find((r) => r.text !== "" && !r.code);
+    if (first && first.sz !== null) {
+      style.fontSize = pxFromHundredths(first.sz);
+    }
+    const text = runs.filter((r) => r.text !== "");
+    if (text.length > 0 && text.every((r) => r.b)) style.weight = 700;
+    if (text.length > 0 && text.every((r) => r.i)) style.italic = true;
+    if (text.length > 0 && text.every((r) => r.u)) style.underline = true;
+    if (first && first.color !== null) style.color = first.color;
+    if (first && first.font !== null) style.fontFamily = first.font;
+
+    const algn = at(el(el(tBody, "p"), "pPr"), "algn") ?? "";
+    const align = algn === "ctr" ? "center" : algn === "r" ? "right" : algn === "just" ? "justify" : null;
+    if (align !== null) style.align = align;
+    const anchor = at(el(tBody, "bodyPr"), "anchor") ?? "";
+    const vertical = anchor === "ctr" ? "middle" : anchor === "b" ? "bottom" : null;
+    if (vertical !== null) style.verticalAlign = vertical;
+
+    return style;
   }
 
   private readSlideSize(): void {
@@ -705,12 +816,17 @@ export class PptxReader {
     const tBody = descendant(sp, "txBody");
     const paragraphMarkdown: string[] = [];
     let anyDecoration = false;
-    if (tBody) {
-      for (const p of descendants(tBody, "p")) {
-        const [md, decorated] = this.paragraphToMarkdown(p);
-        paragraphMarkdown.push(md);
-        anyDecoration = anyDecoration || decorated;
-      }
+    const paragraphs: [boolean, ParsedRun[]][] = tBody ? descendants(tBody, "p").map((p) => this.paragraphRuns(p)) : [];
+    // Bold / italic shared by EVERY text run of the element are its style, so
+    // they carry no markers; decided over the element, as PHP does.
+    const allRuns = paragraphs.flatMap(([, runs]) => runs);
+    const textRuns = allRuns.filter((r) => r.text !== "");
+    const allBold = textRuns.length > 0 && textRuns.every((r) => r.b);
+    const allItalic = textRuns.length > 0 && textRuns.every((r) => r.i);
+    for (const [isBullet, runs] of paragraphs) {
+      const [md, decorated] = this.runsToMarkdown(isBullet, runs, allBold, allItalic);
+      paragraphMarkdown.push(md);
+      anyDecoration = anyDecoration || decorated;
     }
 
     const prstGeom = descendant(sp, "prstGeom");
@@ -718,12 +834,17 @@ export class PptxReader {
 
     const hasText = paragraphMarkdown.some((t) => t !== "");
     if (hasText) {
-      return {
+      const element: Record<string, Any> = {
         ...base,
         type: "text",
         content: paragraphMarkdown.join("\n"),
         format: anyDecoration ? "markdown" : "plain",
       };
+      const style = this.textStyle(tBody!, allRuns);
+      if (Object.keys(style).length > 0) {
+        element.style = style;
+      }
+      return element;
     }
 
     let shapeKind: string | null;
@@ -750,7 +871,7 @@ export class PptxReader {
         shapeKind = null;
     }
     if (shapeKind !== null) {
-      return { ...base, type: "shape", shape: shapeKind };
+      return { ...base, type: "shape", shape: shapeKind, ...this.shapePaint(sp) };
     }
 
     return null;
@@ -877,34 +998,37 @@ export class PptxReader {
     return segments.join("");
   }
 
-  private paragraphToMarkdown(p: XmlNode): [string, boolean] {
+  /** A paragraph's bullet flag and runs. Mirrors PHP `PptxReader::paragraphRuns`. */
+  private paragraphRuns(p: XmlNode): [boolean, ParsedRun[]] {
     // Bullet?
     const pPr = descendant(p, "pPr");
     const bu = pPr ? descendant(pPr, "buChar") : undefined;
     const isBullet = bu !== undefined;
 
-    const runs = descendants(p, "r");
-    if (runs.length === 0) {
-      return [isBullet ? "- " : "", isBullet];
-    }
-
-    let parsed: { text: string; b: boolean; i: boolean; code: boolean }[] = [];
-    let allBold = true;
-    let allItalic = true;
-    let anyNonEmpty = false;
-    for (const r of runs) {
+    const parsed: ParsedRun[] = [];
+    for (const r of descendants(p, "r")) {
       const rPr = el(r, "rPr");
       const tNode = el(r, "t");
       const text = tNode ? deepText(tNode) : "";
       let b = false;
       let i = false;
+      let u = false;
       let code = false;
+      let sz: number | null = null;
+      let color: string | null = null;
+      let font: string | null = null;
       if (rPr) {
         b = (at(rPr, "b") ?? "0") === "1";
         i = (at(rPr, "i") ?? "0") === "1";
+        u = (at(rPr, "u") ?? "none") !== "none";
+        const szAttr = at(rPr, "sz") ?? "";
+        sz = /^[0-9]+$/.test(szAttr) ? parseInt(szAttr, 10) : null;
+        const solid = el(rPr, "solidFill");
+        color = solid ? solidFillColor(solid) : null;
         const latin = el(rPr, "latin");
         if (latin) {
-          const typeface = (at(latin, "typeface") ?? "").toLowerCase();
+          const face = at(latin, "typeface") ?? "";
+          const typeface = face.toLowerCase();
           // Exact match against the typeface the deck RECORDED first, then the
           // name sniff.
           //
@@ -924,23 +1048,27 @@ export class PptxReader {
             typeface.includes("courier")
           ) {
             code = true;
+          } else if (face !== "") {
+            font = face;
           }
         }
       }
-      if (text !== "") {
-        anyNonEmpty = true;
-        if (!b) {
-          allBold = false;
-        }
-        if (!i) {
-          allItalic = false;
-        }
-      }
-      parsed.push({ text, b, i, code });
+      parsed.push({ text, b, i, u, code, sz, color, font });
     }
-    if (!anyNonEmpty) {
+
+    return [isBullet, parsed];
+  }
+
+  /**
+   * One paragraph's runs back into a line of markdown. Bold / italic shared by
+   * every text run of the ELEMENT carry no markers. Mirrors PHP
+   * `PptxReader::runsToMarkdown`.
+   */
+  private runsToMarkdown(isBullet: boolean, runs: ParsedRun[], allBold: boolean, allItalic: boolean): [string, boolean] {
+    if (!runs.some((r) => r.text !== "")) {
       return [isBullet ? "- " : "", isBullet];
     }
+    let parsed = runs;
 
     // Coalesce adjacent runs that carry the SAME decoration.
     //
@@ -999,6 +1127,64 @@ export class PptxReader {
 }
 
 // ─── Module helpers ──────────────────────────────────────────────────────
+
+interface ParsedRun {
+  text: string;
+  b: boolean;
+  i: boolean;
+  u: boolean;
+  code: boolean;
+  sz: number | null;
+  color: string | null;
+  font: string | null;
+}
+
+/** PHP `round($x, 2)` for the positive values the reader produces. */
+function round2(x: number): number {
+  return Math.round(x * 100) / 100;
+}
+
+/** Design pixels on the 1920 canvas from hundredths of a point. */
+function pxFromHundredths(hundredths: number): number {
+  return round2((hundredths * 2) / 75);
+}
+
+/** Design pixels from EMU (12700 per point). */
+function pxFromEmu(emu: number): number {
+  return round2((emu * 8) / 38100);
+}
+
+/** A colour slot's sRGB value (or a system colour's last-known one), upper-case, or null. */
+function schemeHex(slot: XmlNode): string | null {
+  const srgb = el(slot, "srgbClr");
+  const sys = el(slot, "sysClr");
+  const val = (srgb ? at(srgb, "val") ?? "" : sys ? at(sys, "lastClr") ?? "" : "").toUpperCase();
+  return /^[0-9A-F]{6}$/.test(val) ? val : null;
+}
+
+/**
+ * A `<a:solidFill>` as the deck writes colours: `#RRGGBB`, or `rgba(r,g,b,a)`
+ * below opaque. The alpha is formatted from the integer, never a float, so the
+ * three engines print the same digits. Mirrors PHP `solidFillColor`.
+ */
+function solidFillColor(solidFill: XmlNode): string | null {
+  const clr = el(solidFill, "srgbClr");
+  if (!clr) return null;
+  const hex = (at(clr, "val") ?? "").toUpperCase();
+  if (!/^[0-9A-F]{6}$/.test(hex)) return null;
+  const alphaAttr = at(el(clr, "alpha"), "val") ?? "";
+  const alpha = /^[0-9]+$/.test(alphaAttr) ? parseInt(alphaAttr, 10) : 100000;
+  if (alpha >= 100000) return "#" + hex;
+  const fraction = String(alpha).padStart(5, "0").replace(/0+$/, "");
+  return (
+    "rgba(" +
+    parseInt(hex.slice(0, 2), 16) + "," +
+    parseInt(hex.slice(2, 4), 16) + "," +
+    parseInt(hex.slice(4, 6), 16) + "," +
+    (fraction === "" ? "0" : "0." + fraction) +
+    ")"
+  );
+}
 
 /** PHP `round($x, 1)`. */
 function round1(x: number): number {
