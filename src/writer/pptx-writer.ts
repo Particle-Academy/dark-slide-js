@@ -2220,7 +2220,10 @@ export class PptxWriter {
     const baseItalic = style.italic ? ' i="1"' : "";
     const baseUnderline = style.underline ? ' u="sng"' : "";
     const align = this.alignToAlgn(String(style.align ?? "left"));
-    const [colorHex] = Color.parse(String(style.color ?? "#0F172A"), "0F172A");
+    // Unstyled text takes the theme's text colour, as fancy-slides draws it.
+    // A fixed #0F172A here made every unstyled box invisible on a dark theme.
+    const themeText = isPlainObject(this.deckTheme.colors) ? this.deckTheme.colors.text : undefined;
+    const [colorHex] = Color.parse(String(style.color ?? themeText ?? "#0F172A"), "0F172A");
     const fontFamily =
       style.fontFamily !== undefined && style.fontFamily !== null
         ? '<a:latin typeface="' + Xml.attr(String(style.fontFamily)) + '"/>'
