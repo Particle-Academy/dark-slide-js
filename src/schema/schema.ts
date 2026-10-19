@@ -287,6 +287,11 @@ function chartOptionJsonSchema(): Record<string, unknown> {
               type: "boolean",
               description: "Line series only: curve the line.",
             },
+            label: {
+              type: "object",
+              description: "Data labels, as ECharts: `{\"show\": true}` draws each point's value on the chart (bars above the bar, lines above the point, pie slices best fit). Off by default.",
+              properties: { show: { type: "boolean" } },
+            },
             areaStyle: {
               type: "object",
               description: "Line series only: fill under the line. Its PRESENCE is what this writer reads -- the styling inside it is browser-only, so an empty object is enough.",
@@ -303,6 +308,11 @@ function chartOptionJsonSchema(): Record<string, unknown> {
             description: "The category labels, in order, one per point in each series.",
           },
         },
+      },
+      legend: {
+        type: "object",
+        description: "A legend below the chart. Drawn only when this key is present and `show` is not false, as ECharts draws it: a single-series chart usually needs none, because the slide title and the series name already say what is plotted.",
+        properties: { show: { type: "boolean" } },
       },
       categories: {
         type: "array",

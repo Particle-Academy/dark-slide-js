@@ -9,12 +9,16 @@ export interface ChartSeries {
   smooth: boolean;
   area: boolean;
   points: { x: number; y: number }[];
+  /** ECharts' `label.show`: the series' values drawn on the chart. */
+  labels: boolean;
 }
 export interface ChartSpec {
   kind: string;
   title: string;
   categories: string[];
   series: ChartSeries[];
+  /** Only when `option.legend` is set and not switched off, as ECharts draws it. */
+  legend: boolean;
 }
 
 /**
@@ -64,7 +68,7 @@ export const ChartTranslator = {
 
     if (series.length === 0 || kind === null) return null;
 
-    return { kind, title: extractTitle(option), categories, series };
+    return { kind, title: extractTitle(option), categories, series, legend: wantsLegend(option) };
   },
 };
 
@@ -127,7 +131,15 @@ function normaliseSeries(raw: Any, type: string): ChartSeries | null {
   if (type !== "scatter" && values.length === 0) return null;
 
   const area = type === "line" && raw.areaStyle !== undefined;
-  return { type, name, values, smooth: !!raw.smooth, area, points };
+  const labels = isPlainObject(raw.label) && raw.label.show === true;
+  return { type, name, values, smooth: !!raw.smooth, area, points, labels };
+}
+
+/** Whether the chart draws a legend: only when `option.legend` is set and not switched off. */
+function wantsLegend(option: Any): boolean {
+  // An object OR a list, as PHP's is_array reads it: ECharts allows both.
+  const legend = option.legend;
+  return typeof legend === "object" && legend !== null && legend.show !== false;
 }
 
 function numericValue(point: Any): number {

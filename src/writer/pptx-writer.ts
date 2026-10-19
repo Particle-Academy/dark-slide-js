@@ -1552,7 +1552,9 @@ export class PptxWriter {
     }
 
     const [fillHex, fillAlpha] = Color.parse(element.fill ?? "rgba(139,92,246,0.15)", "8B5CF6");
-    const [strokeHex, strokeAlpha] = Color.parse(element.stroke ?? "#8B5CF6", "8B5CF6");
+    // The theme accent, as fancy-slides draws it.
+    const themeAccent = isPlainObject(this.deckTheme.colors) ? this.deckTheme.colors.accent : undefined;
+    const [strokeHex, strokeAlpha] = Color.parse(element.stroke ?? themeAccent ?? "#8B5CF6", "8B5CF6");
     // Design pixels, as fancy-slides draws it: the default 2px is 0.75pt.
     const strokeWidth = toFloat(element.strokeWidth ?? 2);
     const strokeWidthEmu = Emu.fromPt(DesignUnits.toPt(strokeWidth, this.deckTheme));
@@ -1934,7 +1936,8 @@ export class PptxWriter {
       "<c:layout/>" +
       plot +
       "</c:plotArea>" +
-      '<c:legend><c:legendPos val="b"/><c:overlay val="0"/></c:legend>' +
+      // Only when the option asks, as ECharts draws it.
+      (spec.legend ? '<c:legend><c:legendPos val="b"/><c:overlay val="0"/></c:legend>' : "") +
       '<c:plotVisOnly val="1"/>' +
       '<c:dispBlanksAs val="gap"/>' +
       "</c:chart>" +
@@ -1951,6 +1954,7 @@ export class PptxWriter {
         '<c:order val="' + idx + '"/>' +
         this.chartSeriesName(series, idx) +
         this.chartSeriesFill(idx) +
+        this.chartDataLabels(series, "outEnd") +
         this.chartCatRef(spec.categories, series.values) +
         this.chartValRef(series.values) +
         "</c:ser>";
@@ -1987,6 +1991,7 @@ export class PptxWriter {
         '<c:order val="' + idx + '"/>' +
         this.chartSeriesName(series, idx) +
         this.chartSeriesLine(idx) +
+        this.chartDataLabels(series, isArea ? null : "t") +
         this.chartCatRef(spec.categories, series.values) +
         this.chartValRef(series.values) +
         smooth +
@@ -2042,6 +2047,7 @@ export class PptxWriter {
       '<c:order val="0"/>' +
       this.chartSeriesName(series, 0) +
       dPts +
+      this.chartDataLabels(series, "bestFit") +
       this.chartCatRef(categories, values) +
       this.chartValRef(values) +
       "</c:ser>" +
@@ -2092,6 +2098,10 @@ export class PptxWriter {
       '<c:scaling><c:orientation val="minMax"/></c:scaling>' +
       '<c:delete val="0"/>' +
       '<c:axPos val="b"/>' +
+      // Stated, never left to a reader's default (see the PHP engine).
+      '<c:majorTickMark val="out"/>' +
+      '<c:minorTickMark val="none"/>' +
+      '<c:tickLblPos val="nextTo"/>' +
       '<c:crossAx val="222222222"/>' +
       "</c:catAx>" +
       "<c:valAx>" +
@@ -2099,6 +2109,9 @@ export class PptxWriter {
       '<c:scaling><c:orientation val="minMax"/></c:scaling>' +
       '<c:delete val="0"/>' +
       '<c:axPos val="l"/>' +
+      '<c:majorTickMark val="none"/>' +
+      '<c:minorTickMark val="none"/>' +
+      '<c:tickLblPos val="nextTo"/>' +
       '<c:crossAx val="111111111"/>' +
       "</c:valAx>"
     );
@@ -2110,6 +2123,20 @@ export class PptxWriter {
 
     return (
       '<c:tx><c:strRef><c:f>Sheet1!$A$' + (idx + 1) + '</c:f><c:strCache><c:ptCount val="1"/><c:pt idx="0"><c:v>' + Xml.text(name) + "</c:v></c:pt></c:strCache></c:strRef></c:tx>"
+    );
+  }
+
+  /** `<c:dLbls>` showing each value when the series asks with `label.show`; "" otherwise. */
+  private chartDataLabels(series: Any, position: string | null): string {
+    if (!series.labels) return "";
+
+    return (
+      "<c:dLbls>" +
+      "<c:spPr><a:noFill/><a:ln><a:noFill/></a:ln></c:spPr>" +
+      (position !== null ? '<c:dLblPos val="' + position + '"/>' : "") +
+      '<c:showLegendKey val="0"/><c:showVal val="1"/><c:showCatName val="0"/>' +
+      '<c:showSerName val="0"/><c:showPercent val="0"/><c:showBubbleSize val="0"/>' +
+      "</c:dLbls>"
     );
   }
 

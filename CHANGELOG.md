@@ -2,6 +2,26 @@
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-19
+
+Native charts now look like the chart fancy-slides draws from the same option.
+Same change as `particle-academy/dark-slide` 0.15.0 and `fancy-dark-slide` 0.8.0;
+parity holds.
+
+### Changed
+
+- **A chart draws a legend only when `option.legend` is set** (and `show` is not
+  `false`), as ECharts does. It used to draw one always. **To keep a legend, add
+  `"legend": {}` to the option.**
+- **A shape's outline defaults to `theme.colors.accent`**, as fancy-slides draws
+  it, instead of a fixed purple. Set `stroke` (or `strokeWidth: 0`) to choose.
+- **Axes state their tick marks** (no minor ticks). Nothing to do.
+
+### Added
+
+- **Data labels**: `series[].label: {"show": true}` draws each value on the
+  chart. Off by default. Both new keys are in the published schema.
+
 ## [0.12.1] - 2026-10-18
 
 ### Fixed
