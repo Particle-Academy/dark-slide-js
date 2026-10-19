@@ -963,15 +963,52 @@ export class PptxReader {
       columns.push(column);
     }
 
-    const bodyRows: Record<string, string>[] = [];
-    for (let r = hasHeader ? 1 : 0; r < rows.length; r++) {
+    // Styling, read as the cell model that writes it. Mirrors PHP
+    // PptxReader::parseGraphicFrame step for step.
+    const bodyStart = hasHeader ? 1 : 0;
+    const bodyStyles: CellLook[] = [];
+    const oddFills: (string | null)[] = [];
+    for (let r = bodyStart; r < rows.length; r++) {
+      for (const tc of descendants(rows[r]!, "tc")) {
+        const look = this.cellStyle(tc);
+        bodyStyles.push(look);
+        if ((r - bodyStart) % 2 === 1) oddFills.push(look.fill);
+      }
+    }
+    const tableColor = modal(bodyStyles.map((s) => s.color));
+    const tableSize = modal(bodyStyles.map((s) => s.fontSize));
+    const stripeFill = modal(oddFills);
+    const style: Record<string, Any> = { stripe: stripeFill === null ? false : { fill: stripeFill } };
+    if (tableColor !== null) style.color = tableColor;
+    if (tableSize !== null) style.fontSize = tableSize;
+    if (hasHeader && firstCells[0] !== undefined) {
+      const head = this.cellStyle(firstCells[0]);
+      const header: Record<string, Any> = { fill: head.fill ?? "none", bold: head.bold };
+      if (head.color !== null) header.color = head.color;
+      if (head.fontSize !== null && head.fontSize !== tableSize) header.fontSize = head.fontSize;
+      style.header = header;
+    } else {
+      style.header = false;
+    }
+
+    const bodyRows: Record<string, Any>[] = [];
+    for (let r = bodyStart; r < rows.length; r++) {
       const rowCells = descendants(rows[r]!, "tc");
-      const rowData: Record<string, string> = {};
+      const band = (r - bodyStart) % 2 === 1 ? stripeFill : null;
+      const rowData: Record<string, Any> = {};
       columns.forEach((col, i) => {
         const cell = rowCells[i];
-        if (cell !== undefined) {
-          rowData[col.key] = this.cellText(cell);
-        }
+        if (cell === undefined) return;
+        const s = this.cellStyle(cell);
+        const own: Record<string, Any> = {};
+        if (s.fill !== band) own.fill = s.fill ?? "none";
+        if (s.color !== null && s.color !== tableColor) own.color = s.color;
+        if (s.bold) own.bold = true;
+        if (s.italic) own.italic = true;
+        if (s.fontSize !== null && s.fontSize !== tableSize) own.fontSize = s.fontSize;
+        if (s.align !== null) own.align = s.align;
+        if (s.fontFamily !== null) own.fontFamily = s.fontFamily;
+        rowData[col.key] = Object.keys(own).length === 0 ? s.text : { text: s.text, ...own };
       });
       bodyRows.push(rowData);
     }
@@ -987,7 +1024,44 @@ export class PptxReader {
       h: this.fracY(parseInt(at(extent, "cy") ?? "0", 10) || 0),
       columns,
       rows: bodyRows,
+      style,
     };
+  }
+
+  /** One table cell's text and look. Mirrors PHP `PptxReader::cellStyle`. */
+  private cellStyle(tc: XmlNode): CellLook {
+    const tcPr = el(tc, "tcPr");
+    const fillSolid = el(tcPr, "solidFill");
+    const fill = fillSolid ? solidFillColor(fillSolid) : null;
+    let rPr: XmlNode | undefined;
+    for (const r of descendants(tc, "r")) {
+      rPr = el(r, "rPr");
+      if (rPr) break;
+    }
+    rPr ??= descendant(tc, "endParaRPr");
+    let color: string | null = null;
+    let fontSize: number | null = null;
+    let fontFamily: string | null = null;
+    let bold = false;
+    let italic = false;
+    if (rPr) {
+      const solid = el(rPr, "solidFill");
+      color = solid ? solidFillColor(solid) : null;
+      bold = (at(rPr, "b") ?? "0") === "1";
+      italic = (at(rPr, "i") ?? "0") === "1";
+      const sz = at(rPr, "sz") ?? "";
+      fontSize = /^[0-9]+$/.test(sz) ? pxFromHundredths(parseInt(sz, 10)) : null;
+      const face = at(el(rPr, "latin"), "typeface") ?? "";
+      fontFamily = face !== "" ? face : null;
+    }
+    let pPr: XmlNode | undefined;
+    for (const p of descendants(tc, "p")) {
+      pPr = el(p, "pPr");
+      if (pPr) break;
+    }
+    const algn = at(pPr, "algn") ?? "";
+    const align = algn === "ctr" ? "center" : algn === "r" ? "right" : algn === "just" ? "justify" : null;
+    return { text: this.cellText(tc), fill, color, bold, italic, fontSize, align, fontFamily };
   }
 
   /**
@@ -1273,6 +1347,35 @@ function chartPoints(ser: XmlNode, host: string): string[] {
 function phpFloat(v: string): number {
   const n = Number(v);
   return v.trim() === "" || Number.isNaN(n) ? 0 : n;
+}
+
+interface CellLook {
+  text: string;
+  fill: string | null;
+  color: string | null;
+  bold: boolean;
+  italic: boolean;
+  fontSize: number | null;
+  align: string | null;
+  fontFamily: string | null;
+}
+
+/** The most common non-null value; a tie goes to the one seen first. Mirrors PHP `modal`. */
+function modal<T extends string | number>(values: (T | null)[]): T | null {
+  let best: T | null = null;
+  let bestCount = 0;
+  const seen = new Map<string, number>();
+  for (const v of values) {
+    if (v === null) continue;
+    const key = (typeof v === "string" ? "s:" : "n:") + String(v);
+    const n = (seen.get(key) ?? 0) + 1;
+    seen.set(key, n);
+    if (n > bestCount) {
+      best = v;
+      bestCount = n;
+    }
+  }
+  return best;
 }
 
 interface ParsedRun {

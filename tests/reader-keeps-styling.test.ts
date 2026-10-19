@@ -133,3 +133,24 @@ describe("charts on read", () => {
     expect(chartPart(Agent.toBytes(read(deck)))).toBe(chartPart(Agent.toBytes(deck)));
   });
 });
+
+describe("tables on read", () => {
+  it("reads a table back with its styling, as the cell model that writes it", () => {
+    const deck = rksDeck();
+    deck.slides[0].elements = [{
+      id: "kpi", type: "table", x: 0.06, y: 0.2, w: 0.88, h: 0.5,
+      columns: [{ key: "k", label: "KPI", width: 0.5 }, { key: "s", label: "Status", width: 0.5 }],
+      rows: [
+        { k: "On-time delivery", s: { text: "Below target", fill: "#DC2626", color: "#FFFFFF", bold: true } },
+        { k: "Damage rate", s: { text: "On target", fill: "#16A34A", color: "#FFFFFF", bold: true } },
+      ],
+      style: { header: { fill: "#38BDF8", color: "#0B1220" }, fontSize: 36 },
+    }];
+    const table = read(deck).slides[0].elements[0];
+    expect(table.style.header).toMatchObject({ fill: "#38BDF8", color: "#0B1220", bold: true });
+    expect(table.style.fontSize).toBe(36);
+    expect(table.rows[0].col1).toBe("On-time delivery");
+    expect(table.rows[0].col2).toMatchObject({ text: "Below target", fill: "#DC2626", color: "#FFFFFF", bold: true });
+    expect(rksParts(Agent.toBytes(read(deck))).slide).toBe(rksParts(Agent.toBytes(deck)).slide);
+  });
+});
