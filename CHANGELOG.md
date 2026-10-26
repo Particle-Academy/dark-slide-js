@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.19.1] - 2026-10-26
+
 ### Security
 
 - Harden public `unzipSync()` and PPTX reads against ZIP bombs, duplicate/unsafe
