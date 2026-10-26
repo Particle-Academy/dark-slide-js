@@ -1,6 +1,7 @@
 export { Agent, VERSION } from "./agent";
 export { DarkSlide } from "./dark-slide";
-export { SchemaException } from "./exceptions";
+export { SchemaException, ArchiveRefused } from "./exceptions";
+export type { ArchiveLimits } from "./zip/source-archive";
 export { FontEmbeddingException } from "./fonts/font-embedding-exception";
 export { EmbeddedFonts, FONT_VARIANTS, type FontOptions, type FontSource, type FontVariant } from "./fonts/embedded-fonts";
 export { DesignUnits } from "./helpers/design-units";

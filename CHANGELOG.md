@@ -4,6 +4,12 @@
 
 ### Security
 
+- Harden public `unzipSync()` and PPTX reads against ZIP bombs, duplicate/unsafe
+  member names, CRC/size mismatch, inconsistent metadata and truncation. Inflation
+  is bounded during allocation; failures expose `ArchiveRefused.reason` and
+  `unzipSync()` accepts `ArchiveLimits`. Valid fixture payloads and reader
+  projections remain unchanged. No runtime dependency added.
+
 - Update Vitest to 4.1.12 for security fixes; dev toolchain only, nothing to do.
 
 - **Dev toolchain only — no runtime change, nothing for consumers to do.** The

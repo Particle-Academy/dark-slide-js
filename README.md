@@ -13,6 +13,12 @@ The deck schema is identical to
 so a `fancy-slides` DeckEditor deck exports to PowerPoint with no translation —
 in the browser or in Node.
 
+Archive reads enforce 64 MiB input/part, 256 MiB expanded data, 16,384 members
+and 1000:1 expansion. Invalid, duplicate, unsafe or unsupported entries raise
+the exported `ArchiveRefused` with a constant `reason`. Advanced callers can
+pass `ArchiveLimits` as the second `unzipSync()` argument. These checks concern
+ZIP input; they do not promise support for every PowerPoint XML construct.
+
 ```ts
 import { Agent } from "@particle-academy/dark-slide";
 
