@@ -40,7 +40,9 @@
 
 import { Emu } from "../helpers/emu";
 import { parseXml, el, els, at, type XmlNode } from "./xml";
-import { crc32, unzipSync } from "../zip";
+import { crc32 } from "../zip";
+import { sourceKind, TEMPLATE } from "../zip/office-template";
+import { SourceArchive } from "../zip/source-archive";
 
 const DECODER = new TextDecoder();
 const ENCODER = new TextEncoder();
@@ -266,12 +268,22 @@ export class PptxReader {
     this.slideNumber = 0;
     this.slideFallbackIds = 0;
 
-    this.parts = unzipSync(bytes);
+    const zip = SourceArchive.open(bytes);
+    // Classified first: a .potm or a cross-family declaration is refused before
+    // any part is parsed.
+    const kind = sourceKind(zip);
+    const parts: Record<string, Uint8Array> = Object.create(null);
+    for (const name of zip.names()) parts[name] = zip.read(name)!;
+    this.parts = parts;
     const deck = this.extract();
     // Stamped HERE rather than inside extract() because extract() has early
     // returns for a malformed package, and an id that some return paths skip is
     // worse than one that is wrong.
     deck.id = "imported-" + this.contentDigest(deck);
+    // After the digest, deliberately: a .potx and its .pptx twin hold the same
+    // content and so read to the same id. sourceKind says what the PACKAGE was
+    // declared as, which is not content.
+    if (kind === TEMPLATE) deck.sourceKind = TEMPLATE;
     return deck;
   }
 

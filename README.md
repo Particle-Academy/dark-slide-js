@@ -56,6 +56,30 @@ await Agent.write(deck, "deck.pptx"); // Node only
 Coordinates are `0..1` fractions of the slide; text supports inline markdown
 (`**bold**`, `*italic*`, `` `code` ``, `#`/`##`/`###` headings, `[label](url)`).
 
+## PowerPoint templates (.potx)
+
+A `.potx` is a `.pptx` whose main part is declared a template. `Agent.read()`
+reads one exactly as its twin and adds `sourceKind: "template"` (the deck `id`
+is unchanged by it). A presentation read has no `sourceKind` key.
+
+```ts
+import { Agent, convertTemplate } from "@particle-academy/dark-slide";
+
+Agent.read(potxBytes).sourceKind;        // "template"
+convertTemplate(potxBytes);              // .pptx bytes ("document" | "template" | null = flip)
+```
+
+```
+npx dark-slide template:convert brand.potx brand.pptx
+npx dark-slide template:convert deck.pptx deck.potx --to=template
+```
+
+Only the content-type value in `[Content_Types].xml` changes; every other zip
+member is copied as its original record. Refused with `OfficeTemplateRefused`
+(constant `reason`): `.potm` (`macro_enabled`), another family's template
+(`family_mismatch`). Archive guards apply first. `.otp` / `.odp` are not
+handled: there is no ODF presentation reader.
+
 ## Reading is deterministic
 
 `Agent.read()` is a **pure function of its bytes.** The same `.pptx` read twice

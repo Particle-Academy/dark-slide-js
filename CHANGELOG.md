@@ -2,6 +2,33 @@
 
 ## [Unreleased]
 
+### Added
+
+- **PowerPoint `.potx` templates**, matching PHP dark-slide. `Agent.read()` /
+  `PptxReader.fromBytes()` read one exactly as its `.pptx` twin and add
+  `sourceKind: "template"`, stamped AFTER the content digest so a `.potx` and its
+  `.pptx` read to the same deck `id`. Presentation reads are unchanged and carry
+  no `sourceKind` key: nothing to do unless you want to tell the two apart.
+- **`Agent.convertTemplate(bytes, to?)`** (also exported as `convertTemplate`)
+  and a `dark-slide` bin: `npx dark-slide template:convert <in> <out>
+  [--to=document|template] [--force]`. Only the main part's content-type value
+  in `[Content_Types].xml` is rewritten; every other zip member is copied as its
+  original record, byte for byte. The bin is Node-only; the library stays
+  isomorphic (`dist/index.js` is still one self-contained file).
+- `OfficeTemplateRefused` with a constant `reason`, and the `SourceKind` type.
+- OpenDocument presentations (`.otp` / `.odp`) are NOT supported: there is no
+  ODF presentation reader, so the converter refuses them as `not_convertible`
+  and reading one is unchanged.
+
+### Changed
+
+- **A macro-enabled template (`.potm`) is now refused** with
+  `OfficeTemplateRefused` reason `macro_enabled`; it used to be read with its VBA
+  silently ignored. So is a `.potx` carrying a `vbaProject.bin`. A `.pptm`
+  still reads as before but is never converted.
+- A package declaring a Word or Excel template type, or a template type on a
+  part other than `/ppt/presentation.xml`, is refused with `family_mismatch`.
+
 ## [0.19.1] - 2026-10-26
 
 ### Security

@@ -14,6 +14,7 @@ import type { RepairResult, ValidationError, WriteOptions, WriteResult } from ".
 import { Validator } from "./schema/validator";
 import { PptxWriter } from "./writer/pptx-writer";
 import { lintDeck, type LintFinding } from "./lint";
+import { convert as convertOfficeTemplate, type SourceKind } from "./zip/office-template";
 
 /** This package's own version, pinned to package.json by `version.test.ts`. */
 export const VERSION = "0.19.1";
@@ -101,6 +102,21 @@ export const Agent = {
   },
 
   /**
+   * Turn a PowerPoint `.potx` template into its `.pptx` twin, or back. `to` is
+   * `document`, `template`, or null/omitted to flip. Mirrors PHP
+   * `Agent::convertTemplate()`.
+   *
+   * Only the main part's content-type value in `[Content_Types].xml` is
+   * rewritten; every other member is copied as its original zip record, byte
+   * for byte. Macro-enabled packages (.potm, .pptm) are refused, and so are
+   * OpenDocument presentations: dark-slide does not read them. Throws
+   * `OfficeTemplateRefused` or `ArchiveRefused`.
+   */
+  convertTemplate(input: Uint8Array | ArrayBuffer, to: SourceKind | null = null): Uint8Array {
+    return convertOfficeTemplate(toU8(input), to);
+  },
+
+  /**
    * Layout problems that will show on the slides, read-only. Mirrors PHP
    * `Agent::lint`; hand the findings back to the agent that built the deck.
    */
@@ -151,3 +167,8 @@ export const Agent = {
     return VERSION;
   },
 };
+
+/** {@link Agent.convertTemplate} as a plain function. */
+export function convertTemplate(input: Uint8Array | ArrayBuffer, to: SourceKind | null = null): Uint8Array {
+  return Agent.convertTemplate(input, to);
+}
