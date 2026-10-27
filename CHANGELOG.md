@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-10-27
+
 ### Added
 
 - **PowerPoint `.potx` templates**, matching PHP dark-slide. `Agent.read()` /
