@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.20.1] - 2026-10-27
+
 ### Fixed
 
 - **Markdown text now honours CommonMark backslash escapes**, matching PHP
