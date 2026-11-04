@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.5.3 — 2026-11-04
+
+A security patch on the 0.4 kit line. It carries this fix and nothing else.
+
+### Security
+
+- **The reader now refuses a `DOCTYPE` in every XML part of a pptx, as the PHP
+  engine does.** The parser skipped a declaration without reading it, which could
+  let a crafted file change the titles, text and notes the reader returned. A
+  part is also read in the encoding it declares, so a UTF-16 part is read
+  correctly and is checked for what it really says.
+  **What to do:** upgrade if you read files you did not write. No code changes.
+  Real decks carry no `DOCTYPE`, so they read exactly as before. A part with one
+  is treated as if it were malformed, the handling each part has always had: a
+  refused slide keeps its place with no elements, a refused title falls back to
+  `Imported`, and refused notes are left out.
+
 ## 0.5.2 — 2026-05-30
 
 Initial Node/TypeScript port of `particle-academy/dark-slide` (PHP), at

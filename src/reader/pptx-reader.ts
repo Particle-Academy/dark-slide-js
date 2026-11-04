@@ -5,10 +5,8 @@
  */
 
 import { Emu } from "../helpers/emu";
-import { parseXml, el, at, type XmlNode } from "./xml";
+import { decodePart, parseXml, el, at, type XmlNode } from "./xml";
 import { unzipSync } from "../zip";
-
-const DECODER = new TextDecoder();
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any;
@@ -87,7 +85,7 @@ export class PptxReader {
 
   private getPart(name: string): string | false {
     const p = this.parts[name];
-    return p === undefined ? false : DECODER.decode(p);
+    return p === undefined ? false : decodePart(p);
   }
 
   private extract(): Record<string, unknown> {
