@@ -13,7 +13,7 @@ import { Validator } from "./schema/validator";
 import { PptxWriter } from "./writer/pptx-writer";
 
 /** Feature-parity baseline with PHP dark-slide; bumped independently on npm. */
-export const VERSION = "0.5.2";
+export const VERSION = "0.5.3";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any;
