@@ -22,8 +22,8 @@
  *
  * @internal
  */
-import { OfficeTemplateRefused } from "../exceptions";
-import { parseXml, type XmlNode } from "../reader/xml";
+import { ArchiveRefused, OfficeTemplateRefused } from "../exceptions";
+import { decodePart, parseXml, partIsRefused, type XmlNode } from "../reader/xml";
 import { crc32 } from "./crc32";
 import { SourceArchive, type ArchiveEntry } from "./source-archive";
 
@@ -82,7 +82,6 @@ const FAMILIES: Record<string, Family> = {
 };
 
 const OWN = FAMILIES[FAMILY]!;
-const UTF8 = new TextDecoder("utf-8");
 
 /**
  * `document` or `template`, for a package the reader is about to read. A
@@ -93,7 +92,11 @@ const UTF8 = new TextDecoder("utf-8");
  */
 export function sourceKind(zip: SourceArchive): SourceKind {
   const types = zip.read("[Content_Types].xml");
-  return types === null ? DOCUMENT : ooxmlKind(zip, types);
+  if (types === null) return DOCUMENT;
+  // Reading this as merely unparsable would make the package a plain document,
+  // and every declaration in it would go unchecked.
+  if (partIsRefused(types)) throw new ArchiveRefused("archive_unsupported");
+  return ooxmlKind(zip, types);
 }
 
 /**
@@ -267,12 +270,11 @@ function rebuild(zip: SourceArchive, replacements: Map<string, Uint8Array>): Uin
 
 // ─── Helpers ───────────────────────────────────────────────────────────
 
-/** Parse; null when absent, empty or carrying a DOCTYPE (as PHP's DOM gate). */
+/** Parse; null when absent, empty, malformed or refused (as PHP's gate). */
 function dom(xml: Uint8Array | string | null): XmlNode | null {
   if (xml === null) return null;
-  const text = typeof xml === "string" ? UTF8.decode(fromLatin1(xml)) : UTF8.decode(xml);
-  if (text === "" || /<!DOCTYPE/i.test(text)) return null;
-  return parseXml(text);
+  const text = decodePart(typeof xml === "string" ? fromLatin1(xml) : xml);
+  return text === "" ? null : parseXml(text);
 }
 
 function* elements(root: XmlNode): Generator<XmlNode> {

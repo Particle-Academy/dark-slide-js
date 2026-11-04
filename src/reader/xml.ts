@@ -72,7 +72,53 @@ function parseTag(inner: string): { name: string; attrs: Record<string, string> 
   return { name, attrs };
 }
 
+const UTF8 = new TextDecoder();
+
+/**
+ * The encoding a part is written in, or null when this port cannot decode it.
+ * Reads the byte order first, as an XML parser does, then the declaration.
+ */
+function partEncoding(b: Uint8Array): string | null {
+  if (b[0] === 0xff && b[1] === 0xfe) return b[2] === 0 && b[3] === 0 ? null : "utf-16le";
+  if (b[0] === 0xfe && b[1] === 0xff) return "utf-16be";
+  if (b[0] === 0 && b[1] === 0) return null;
+  if (b[0] === 0x3c && b[1] === 0) return b[2] === 0 ? null : "utf-16le";
+  if (b[0] === 0 && b[1] === 0x3c) return "utf-16be";
+  const start = b[0] === 0xef && b[1] === 0xbb && b[2] === 0xbf ? 3 : 0;
+  const head = String.fromCharCode(...b.subarray(start, start + 200));
+  const label = /^<\?xml\s[^>]*?encoding\s*=\s*["']([A-Za-z0-9._-]+)["']/.exec(head)?.[1]?.toLowerCase();
+  // Bytes that got this far are not UTF-16, whatever the declaration claims.
+  if (label === undefined || label === "utf-8" || label.startsWith("utf-16") || label === "utf16") return "utf-8";
+  try {
+    new TextDecoder(label);
+    return label;
+  } catch {
+    return null;
+  }
+}
+
+function decodeOrNull(bytes: Uint8Array): string | null {
+  const encoding = partEncoding(bytes);
+  if (encoding === null) return null;
+  return encoding === "utf-8" ? UTF8.decode(bytes) : new TextDecoder(encoding).decode(bytes);
+}
+
+/** A part's text, or "" when this port cannot decode it, which parses as nothing. */
+export function decodePart(bytes: Uint8Array): string {
+  return decodeOrNull(bytes) ?? "";
+}
+
+/** Whether a part is refused, as opposed to merely malformed or fine. */
+export function partIsRefused(bytes: Uint8Array): boolean {
+  const text = decodeOrNull(bytes);
+  return text === null || walk(text).refused;
+}
+
 export function parseXml(src: string): XmlNode | null {
+  return walk(src).root;
+}
+
+function walk(src: string): { root: XmlNode | null; refused: boolean } {
   let i = 0;
   const n = src.length;
   const root: XmlNode = { name: "#root", attrs: {}, children: [], text: "" };
@@ -96,11 +142,9 @@ export function parseXml(src: string): XmlNode | null {
         i = end < 0 ? n : end + 2;
         continue;
       }
-      if (src.startsWith("<!", i)) {
-        const end = src.indexOf(">", i);
-        i = end < 0 ? n : end + 1;
-        continue;
-      }
+      // A declaration: a DOCTYPE, or nothing a part may hold. Refused here rather
+      // than skipped, because its end cannot be found without parsing its subset.
+      if (src.startsWith("<!", i)) return { root: null, refused: true };
       if (src[i + 1] === "/") {
         const end = src.indexOf(">", i);
         if (stack.length > 1) stack.pop();
@@ -123,7 +167,7 @@ export function parseXml(src: string): XmlNode | null {
     }
   }
 
-  return root.children[0] ?? null;
+  return { root: root.children[0] ?? null, refused: false };
 }
 
 /** First child element with the given local name. */

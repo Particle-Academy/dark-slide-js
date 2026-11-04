@@ -219,6 +219,18 @@ stays 2-1 rather than becoming a three-way split. The live ones are listed in
 `dark-slide-py/AGENTS.md`; do not "fix" one of them here without landing all
 three.
 
+### 10. Every part goes through `reader/xml.ts`, which refuses a DOCTYPE
+
+A presentation part never legitimately carries one, and the hand-written parser
+stops at any declaration rather than trying to skip it. Parts reach it through
+`decodePart`, so the check reads what the part says in whatever encoding it uses,
+and a part read with patterns goes through `readablePart` for the same reason. A
+refusal looks like malformed XML, so each caller keeps its handling of a part it
+cannot read. The exception is `[Content_Types].xml`, whose declarations decide
+which other refusals apply: a refusal there refuses the package with
+`ArchiveRefused`. A test fails if `src/` decodes a part or looks for a DOCTYPE
+anywhere else. `tests/doctype-refusal.test.ts` holds the cases.
+
 ## Embedded fonts (`src/fonts/`)
 
 Opt-in through the write options (`fonts: { typeface: { variant: bytes } }`),

@@ -2,6 +2,33 @@
 
 ## [Unreleased]
 
+### Security
+
+- **The reader now refuses a `DOCTYPE` in every XML part of a pptx**, as PHP and
+  Python do. This parser never expanded entities, and no file contents were
+  reachable. But it read past a `DOCTYPE`, could take the wrong content from a
+  crafted one, and so could return a different result from the other engines for
+  the same file.
+  **What to do:** upgrade if you read files you did not write. No code changes.
+  Real decks carry no `DOCTYPE`, so they read as before. A refused part is read
+  as absent, as a malformed part always was.
+- **A package whose `[Content_Types].xml` carries a `DOCTYPE` is now refused.**
+  It was treated as declaring nothing, so the checks that depend on what a package
+  declares did not run on it. Reading or converting one now throws `ArchiveRefused`
+  with reason `archive_unsupported`.
+  **What to do:** nothing, unless you catch `OfficeTemplateRefused` alone around
+  a read.
+
+### Fixed
+
+- **Parts in another encoding now read.** UTF-16, and whatever else a part
+  declares that the platform can decode, were decoded as UTF-8, so such a slide
+  came back with no elements. PHP has always read them. A part declaring an
+  encoding that cannot be decoded reads as absent, and PHP can decode some of
+  those, so such a file reads there and not here.
+- **Text that only looks like a `DOCTYPE` no longer loses a chart.** A chart title
+  whose CDATA holds an HTML page dropped the whole chart. It now reads.
+
 ## [0.20.1] - 2026-10-27
 
 ### Fixed

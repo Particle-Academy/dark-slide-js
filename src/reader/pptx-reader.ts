@@ -39,12 +39,12 @@
  */
 
 import { Emu } from "../helpers/emu";
-import { parseXml, el, els, at, type XmlNode } from "./xml";
+import { decodePart, parseXml, partIsRefused, el, els, at, type XmlNode } from "./xml";
 import { crc32 } from "../zip";
 import { sourceKind, TEMPLATE } from "../zip/office-template";
 import { SourceArchive } from "../zip/source-archive";
 
-const DECODER = new TextDecoder();
+const UTF8 = new TextDecoder("utf-8");
 const ENCODER = new TextEncoder();
 
 /** Reused across canonicalize() calls; `feed` consumes synchronously, so sharing is safe. */
@@ -316,7 +316,7 @@ export class PptxReader {
    * carry the extension is the common case rather than an error.
    */
   private readMonoTypeface(): string {
-    const xml = this.getPart("ppt/theme/theme1.xml");
+    const xml = this.readablePart("ppt/theme/theme1.xml");
     if (xml === false) {
       return "";
     }
@@ -334,7 +334,13 @@ export class PptxReader {
 
   private getPart(name: string): string | false {
     const p = this.parts[name];
-    return p === undefined ? false : DECODER.decode(p);
+    return p === undefined ? false : decodePart(p);
+  }
+
+  /** A part read with patterns rather than parsed, which the gate still has to pass. */
+  private readablePart(name: string): string | false {
+    const p = this.parts[name];
+    return p === undefined || partIsRefused(p) ? false : UTF8.decode(p);
   }
 
   private extract(): Record<string, unknown> {
@@ -399,7 +405,7 @@ export class PptxReader {
    */
   private readTheme(): Record<string, Any> {
     const xml = this.getPart("ppt/theme/theme1.xml");
-    const root = xml === false || /<!DOCTYPE/i.test(xml) ? null : parseXml(xml);
+    const root = xml === false ? null : parseXml(xml);
     if (!root) {
       return {};
     }
@@ -504,7 +510,7 @@ export class PptxReader {
     this.slideWidthEmu = Emu.DEFAULT_SLIDE_WIDTH;
     this.slideHeightEmu = Emu.DEFAULT_SLIDE_HEIGHT;
 
-    const xml = this.getPart("ppt/presentation.xml");
+    const xml = this.readablePart("ppt/presentation.xml");
     if (xml === false) return;
     const tag = /<p:sldSz\b[^>]*>/.exec(xml);
     if (!tag) return;
@@ -531,7 +537,7 @@ export class PptxReader {
    * binaries.
    */
   private readEmbeddedFonts(): { typeface: string; variants: string[] }[] {
-    const xml = this.getPart("ppt/presentation.xml");
+    const xml = this.readablePart("ppt/presentation.xml");
     if (xml === false) return [];
     const list = /<p:embeddedFontLst>([\s\S]*?)<\/p:embeddedFontLst>/.exec(xml);
     if (!list) return [];
@@ -1085,7 +1091,7 @@ export class PptxReader {
     const rid = ref ? (at(ref, "id") ?? "") : "";
     const target = this.currentSlideRels[rid]?.target;
     const xml = target !== undefined ? this.getPart(target) : false;
-    const root = xml === false || /<!DOCTYPE/i.test(xml) ? null : parseXml(xml);
+    const root = xml === false ? null : parseXml(xml);
     if (!root) {
       return null;
     }
