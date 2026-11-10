@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.20.3] - 2026-11-10
+
 ### Changed
 
 - **The agent guide (`Agent.guide()`) catches up with the PHP package's 0.20 to
