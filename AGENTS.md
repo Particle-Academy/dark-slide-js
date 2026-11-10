@@ -253,6 +253,18 @@ file. Bytes only here (isomorphic); the PHP engine also accepts a path.
 - Tests generate their own TrueType font (`tests/support/generated-font.ts`),
   byte-identical to PHP's `tests/Support/GeneratedFont`.
 
+## The agent guide is shipped surface
+
+`agent-guide/professional-decks.md` (embedded as `src/agent-guide.json`) is what
+`Agent.guide()` returns and what a model builds from, so it is part of the API.
+Release checklist:
+
+- [ ] guide reviewed against this release's CHANGELOG
+
+`tests/agent-guide-covers-the-api.test.ts` fails on an `Agent` function the
+guide never names; it cannot tell whether a new option or behaviour is
+described, which is what the review is for. The PHP copy is canonical.
+
 ## Testing
 
 ```bash

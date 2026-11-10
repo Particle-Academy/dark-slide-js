@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **The agent guide (`Agent.guide()`) catches up with the PHP package's 0.20 to
+  0.22.** New: a "Reading and editing an existing deck" section (`read` /
+  `fromBytes`, charts and styled tables coming back, `describe`, `.potx`
+  templates and `convertTemplate`, `ArchiveRefused` as final, plus the PHP-only
+  ops and streaming), `validateAndRepair` in the build loop, and markdown
+  backslash escapes. Byte-identical to PHP and Python (new SHA-256 in all
+  three). **What to do:** nothing; guide text only, a patch.
+- Dev only: `tests/agent-guide-covers-the-api.test.ts` fails when a function on
+  `Agent` is not named in the guide and not on its allowlist (each entry
+  carries a reason).
+
 ## [0.20.2] - 2026-11-04
 
 ### Security
