@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **Releases need a lab-run certificate.** `publish.yml` gains a read-only
+  `lab-certificate` job that every publishing job needs: a tag is published only
+  when the fancy-labs lab has certified that exact version and commit. Consumers
+  do nothing; this changes how releases are cut, not what the package does.
+
 ## [0.20.3] - 2026-11-10
 
 ### Changed
@@ -791,7 +798,6 @@ compares every part byte for byte, fonts included.
   `VersionIsSingleSourcedTest` / `version.test.ts` now pins it, so the class is
   closed rather than the instance fixed. `dark-slide-py` already had that
   assertion and was the only engine in the family to catch itself.
-
 
 ## 0.7.0 — 2026-09-10
 
