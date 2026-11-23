@@ -100,6 +100,6 @@ describe("the shared table-cell model", () => {
     // The pin moves deliberately, with the suites re-run. A floating fixture set
     // turns a red here into "someone else changed something", which is the
     // reading that gets a failure ignored.
-    expect(suiteVersion()).toBe("0.34.0");
+    expect(suiteVersion()).toBe("0.62.0");
   });
 });

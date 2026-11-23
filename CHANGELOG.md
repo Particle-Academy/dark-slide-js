@@ -15,6 +15,7 @@
 - Rebranded the display name to Fancy Dev Kit (README and package description). Package names, the npm scope, URLs and the `fancy-ui` MCP id are unchanged.
 - **Docs:** `AGENTS.md` is now the guide to using this package (install, its entries on the Fancy MCP catalog server, API essentials, traps), and it ships in the package. The contributor notes it held moved to `CONTRIBUTING.md`, and `CLAUDE.md` is now a symlink to it. The README points to the MCP server and to `AGENTS.md`. No code changed; nothing to do.
 - CI: re-pin org third-party allowlist to 2614224
+- Conformance fixtures 0.62.0: the `dark-slide/table-cell-model` rows are now pinned at fancy-conformance 0.62.0 (was 0.34.0), with the lockfile. Test-only; no runtime change, nothing to do.
 
 ## [0.20.3] - 2026-11-10
 
